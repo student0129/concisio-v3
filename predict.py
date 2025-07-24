@@ -35,14 +35,30 @@ class Predictor:
         Runs the full prediction pipeline.
         The 'task' parameter has been removed.
         """
+
+        print(f"\n[Predict] Starting prediction pipeline")
+        print(f"[Predict] Audio file: {audio_file_path}")
+        print(f"[Predict] Target language: {target_language}")
+    
         output_data = {}
         wav_path = None
         
         try:
+            # Convert to WAV
+            print("[Predict] Converting to WAV...")
             wav_path = convert_to_wav(audio_file_path)
+            print(f"[Predict] WAV path: {wav_path}")
+            
+            # Load audio
+            print("[Predict] Loading audio...")
             audio = whisperx.load_audio(wav_path)
+            print(f"[Predict] Audio loaded, duration: {len(audio)/16000:.1f} seconds")
 
+            # Transcribe
+            print("[Predict] Starting transcription...")
             result = self.model.transcribe(audio, batch_size=16)
+            print(f"[Predict] Transcription complete. Language: {result['language']}")
+        
             output_data["language_detected"] = result["language"]
 
             model_a, metadata = whisperx.load_align_model(language_code=result["language"], device=self.device)
@@ -77,7 +93,9 @@ class Predictor:
                 output_data["summary"] = response.choices[0].message.content
 
         except Exception as e:
-            print(f"An error occurred: {e}")
+            print(f"[Predict] ERROR: {type(e).__name__}: {str(e)}")
+            import traceback
+            traceback.print_exc()
             return {"error": str(e)}
         finally:
             if wav_path and os.path.exists(wav_path):
