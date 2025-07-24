@@ -1,5 +1,5 @@
 # FastAPI and Gradio for web server and UI
-fastapi
+# fastapi
 gradio==4.29.0
 
 # ML/Audio libraries
@@ -9,7 +9,7 @@ whisperx
 pyannote.audio==3.1.1
 
 # Other dependencies
-uvicorn[standard]
+# uvicorn[standard]
 pydub
 ffmpeg-python
 openai
