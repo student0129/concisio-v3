@@ -22,15 +22,13 @@ class Predictor:
         self.compute_type = "float16" if self.device == "cuda" else "int8"
         
         self.model = whisperx.load_model("large-v2", self.device, compute_type=self.compute_type)
-
-        # CORRECTED: The function call for the diarization pipeline has changed.
         self.diarize_model = whisperx.diarize.DiarizationPipeline(use_auth_token=os.getenv("HF_TOKEN"), device=self.device)
-
         self.openai_client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-    def predict(self, audio_file_path, task="transcribe", target_language="en", custom_summary_prompt=None):
+    def predict(self, audio_file_path, target_language="None", custom_summary_prompt=None):
         """
         Runs the full prediction pipeline.
+        The 'task' parameter has been removed.
         """
         output_data = {}
         wav_path = None
@@ -45,7 +43,6 @@ class Predictor:
             model_a, metadata = whisperx.load_align_model(language_code=result["language"], device=self.device)
             result = whisperx.align(result["segments"], model_a, metadata, audio, self.device, return_char_alignments=False)
 
-            # CORRECTED: The diarize_model is now called directly on the audio file.
             diarize_segments = self.diarize_model(audio)
             
             final_segments = merge_text_diarization(result["segments"], diarize_segments)
@@ -53,7 +50,8 @@ class Predictor:
 
             full_text = " ".join([segment['text'].strip() for segment in final_segments])
 
-            if task == "translate" and output_data["language_detected"] != target_language:
+            # Logic is updated to check if a valid language was selected from the dropdown.
+            if target_language != "None" and output_data["language_detected"] != target_language:
                 translate_prompt = build_translate_prompt(full_text, target_language)
                 response = self.openai_client.chat.completions.create(
                     model="gpt-4o",
