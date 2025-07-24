@@ -1,21 +1,20 @@
-# Install torch FIRST with specific version
-torch==2.0.0
-torchaudio==2.0.0
+# FastAPI and Gradio for web server and UI
+gradio==4.29.0
+uvicorn[standard]
 
-# Then install WhisperX from PyPI
+# Forcing an older, stable pydantic version to resolve Gradio API conflict
+pydantic<2.0
+
+# Core ML and transcription libraries
+torch
+torchaudio
 whisperx
-
-# Pin pyannote.audio to avoid conflicts
 pyannote.audio==3.1.1
 
 # Other dependencies
-numpy<2.0  # Prevent numpy 2.x
 pydub
 ffmpeg-python
 openai
 python-dotenv
 pandas
-
-# Commented for HF Spaces
-# fastapi
-# uvicorn[standard]
+numpy
