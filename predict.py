@@ -1,22 +1,50 @@
 import os
-import torch  # Import torch at module level
-import whisperx
-import openai
-from pydub import AudioSegment
-from typing import Dict, List, Any, Optional
 import warnings
 
-# Suppress known warnings
+# Suppress known warnings first
 warnings.filterwarnings("ignore", category=UserWarning, module="pyannote")
 warnings.filterwarnings("ignore", category=UserWarning, module="speechbrain")
 warnings.filterwarnings("ignore", category=UserWarning, module="torchaudio")
 
-from utils import (
-    convert_to_wav,
-    merge_text_diarization,
-    build_translate_prompt,
-    build_summary_prompt
-)
+# Import torch and related libraries
+try:
+    import torch
+    print(f"Torch imported successfully. Version: {torch.__version__}")
+    print(f"CUDA available: {torch.cuda.is_available()}")
+    if torch.cuda.is_available():
+        print(f"CUDA device: {torch.cuda.get_device_name(0)}")
+except ImportError as e:
+    print(f"Error importing torch: {e}")
+    raise e
+
+import whisperx
+import openai
+from pydub import AudioSegment
+from typing import Dict, List, Any, Optional
+
+# Import utils with error handling
+try:
+    from utils import (
+        convert_to_wav,
+        merge_text_diarization,
+        build_translate_prompt,
+        build_summary_prompt
+    )
+    print("Utils imported successfully")
+except ImportError as e:
+    print(f"Warning: Could not import utils: {e}")
+    # Define minimal fallback functions
+    def convert_to_wav(audio_path):
+        return audio_path  # Simple fallback
+    
+    def merge_text_diarization(segments, diarization):
+        return segments  # Simple fallback
+    
+    def build_translate_prompt(text, lang):
+        return f"Translate this to {lang}: {text}"
+    
+    def build_summary_prompt(text, prompt):
+        return f"{prompt}\n\nText: {text}"
 
 class Predictor:
     """
@@ -26,118 +54,145 @@ class Predictor:
         """
         Initializes the Predictor by loading necessary models and setting up the API client.
         """
-        # Enhanced GPU detection and optimization
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.compute_type = "float16" if self.device == "cuda" else "int8"
+        print("Starting Predictor initialization...")
         
-        print(f"Initializing Predictor on {self.device} with {self.compute_type} compute type")
+        # Device detection with extensive error handling
+        try:
+            self.device = "cuda" if torch.cuda.is_available() else "cpu"
+            self.compute_type = "float16" if self.device == "cuda" else "int8"
+            print(f"Device selected: {self.device}")
+            print(f"Compute type: {self.compute_type}")
+        except Exception as e:
+            print(f"Error in device detection: {e}")
+            self.device = "cpu"
+            self.compute_type = "int8"
         
-        # GPU memory optimization and error handling
+        # GPU optimization with error handling
         if self.device == "cuda":
             try:
-                # Clear any existing GPU memory
                 torch.cuda.empty_cache()
-                
-                # Set memory management
                 torch.backends.cudnn.benchmark = True
                 torch.backends.cuda.matmul.allow_tf32 = True
                 
-                # Check GPU memory
                 gpu_memory = torch.cuda.get_device_properties(0).total_memory / 1024**3
                 print(f"GPU Memory: {gpu_memory:.1f} GB")
                 
-                # Set memory fraction to prevent OOM for T4
-                if gpu_memory < 20:  # For T4 (16GB)
+                if gpu_memory < 20:
                     torch.cuda.set_per_process_memory_fraction(0.75)
-                    print("Set GPU memory fraction to 75% for T4 optimization")
+                    print("Set GPU memory fraction to 75%")
                     
             except Exception as e:
-                print(f"GPU setup warning: {e}")
-                # Don't fallback to CPU immediately, try to continue
+                print(f"GPU optimization error: {e}")
+                # Continue without optimization
         
-        # Load models with fallback strategy
+        # Load models
         self._load_whisper_model()
         self._load_diarization_model()
         self._initialize_openai_client()
         
-        print("Predictor initialized successfully.")
+        print("Predictor initialization completed successfully.")
     
     def _load_whisper_model(self):
-        """Load Whisper model with GPU memory fallback"""
-        model_attempts = [
-            ("large-v2", "float16") if self.device == "cuda" else ("base", "int8"),
-            ("medium", "float16") if self.device == "cuda" else ("base", "int8"),
-            ("base", "float16") if self.device == "cuda" else ("base", "int8"),
-        ]
+        """Load Whisper model with progressive fallback"""
+        print("Loading Whisper model...")
         
-        for model_size, compute_type in model_attempts:
+        # Model size options in order of preference
+        if self.device == "cuda":
+            model_options = [
+                ("large-v2", "float16"),
+                ("medium", "float16"),
+                ("base", "float16"),
+                ("base", "int8")  # Last resort
+            ]
+        else:
+            model_options = [
+                ("base", "int8"),
+                ("tiny", "int8")
+            ]
+        
+        for model_size, compute_type in model_options:
             try:
-                print(f"Loading Whisper model: {model_size} with {compute_type}...")
+                print(f"Attempting to load {model_size} model with {compute_type}...")
                 
                 if self.device == "cuda":
-                    torch.cuda.empty_cache()  # Clear memory before loading
+                    torch.cuda.empty_cache()
                 
                 self.model = whisperx.load_model(
                     model_size, 
                     self.device, 
                     compute_type=compute_type,
-                    download_root=None,
-                    threads=4 if self.device == "cpu" else None
+                    download_root=None
                 )
-                print(f"Whisper model {model_size} loaded successfully.")
+                
+                print(f"✅ Successfully loaded {model_size} model")
                 return
                 
             except RuntimeError as e:
-                if "out of memory" in str(e).lower() and self.device == "cuda":
-                    print(f"GPU memory insufficient for {model_size}, trying smaller model...")
+                error_msg = str(e).lower()
+                if "out of memory" in error_msg and self.device == "cuda":
+                    print(f"❌ GPU memory insufficient for {model_size}, trying smaller model...")
                     continue
-                else:
-                    print(f"Error loading {model_size}: {e}")
-                    if model_size == "base":  # Last attempt failed
-                        # Try CPU as final fallback
-                        print("Switching to CPU mode...")
-                        self.device = "cpu"
-                        self.compute_type = "int8"
+                elif "cuda" in error_msg and self.device == "cuda":
+                    print(f"❌ CUDA error with {model_size}, trying CPU fallback...")
+                    self.device = "cpu"
+                    self.compute_type = "int8"
+                    try:
                         self.model = whisperx.load_model("base", "cpu", compute_type="int8")
+                        print("✅ Successfully loaded base model on CPU")
                         return
+                    except Exception as cpu_error:
+                        print(f"❌ CPU fallback also failed: {cpu_error}")
+                        continue
+                else:
+                    print(f"❌ Unexpected error with {model_size}: {e}")
+                    continue
             except Exception as e:
-                print(f"Unexpected error loading {model_size}: {e}")
+                print(f"❌ Error loading {model_size}: {e}")
                 continue
         
-        raise Exception("Failed to load any Whisper model")
+        # If all attempts fail
+        raise Exception("❌ Failed to load any Whisper model")
     
     def _load_diarization_model(self):
         """Load diarization model with error handling"""
-        print("Loading Diarization model...")
+        print("Loading diarization model...")
+        
         try:
             hf_token = os.getenv("HF_TOKEN")
             if not hf_token:
-                print("Warning: HF_TOKEN not found. Diarization may not work properly.")
+                print("⚠️ Warning: HF_TOKEN not found")
+                self.diarize_model = None
+                return
             
-            # Clear GPU memory before loading diarization model
             if self.device == "cuda":
                 torch.cuda.empty_cache()
             
             self.diarize_model = whisperx.DiarizationPipeline(
                 use_auth_token=hf_token, 
-                device=self.device,
-                cache_dir=None,
+                device=self.device
             )
-            print("Diarization model loaded successfully.")
+            print("✅ Diarization model loaded successfully")
             
         except Exception as e:
-            print(f"Warning: Could not load diarization model: {e}")
-            print("Continuing without diarization capability...")
+            print(f"⚠️ Warning: Could not load diarization model: {e}")
+            print("Continuing without diarization...")
             self.diarize_model = None
     
     def _initialize_openai_client(self):
         """Initialize OpenAI client"""
+        print("Initializing OpenAI client...")
+        
         openai_key = os.getenv("OPENAI_API_KEY")
         if not openai_key:
-            print("Warning: OPENAI_API_KEY not found. Translation and summarization will not work.")
+            print("⚠️ Warning: OPENAI_API_KEY not found")
             self.openai_client = None
         else:
-            self.openai_client = openai.OpenAI(api_key=openai_key)
+            try:
+                self.openai_client = openai.OpenAI(api_key=openai_key)
+                print("✅ OpenAI client initialized successfully")
+            except Exception as e:
+                print(f"⚠️ Warning: OpenAI client initialization failed: {e}")
+                self.openai_client = None
 
     def predict(
         self, 
@@ -149,209 +204,171 @@ class Predictor:
     ) -> Dict[str, Any]:
         """
         Runs the full prediction pipeline.
-        
-        Args:
-            audio_file_path: Path to the audio file
-            target_language: Target language code for translation
-            custom_summary_prompt: Custom prompt for summarization
-            include_diarization: Whether to perform speaker diarization
-            fast_diarization: Whether to use fast diarization mode
-            
-        Returns:
-            Dictionary containing the results or error information
         """
-
-        print(f"\n[Predict] Starting prediction pipeline")
+        print(f"\n{'='*50}")
+        print(f"[Predict] Starting prediction pipeline")
         print(f"[Predict] Audio file: {audio_file_path}")
         print(f"[Predict] Target language: {target_language}")
         print(f"[Predict] Include diarization: {include_diarization}")
-        print(f"[Predict] Custom prompt provided: {bool(custom_summary_prompt and custom_summary_prompt.strip())}")
-    
+        print(f"[Predict] Fast diarization: {fast_diarization}")
+        
         output_data = {}
         wav_path = None
         
         try:
-            # Convert to WAV with optimization
+            # Convert to WAV
             print("[Predict] Converting to WAV...")
             wav_path = convert_to_wav(audio_file_path)
             print(f"[Predict] WAV path: {wav_path}")
             
-            # Check if file should be chunked for large files (>15 minutes)
-            audio_info = whisperx.load_audio(wav_path)
-            duration_minutes = len(audio_info) / (16000 * 60)
-            
-            if duration_minutes > 15:
-                print(f"[Predict] Large file detected ({duration_minutes:.1f} minutes). Using chunked processing...")
-                return self._process_large_file(wav_path, target_language, custom_summary_prompt, include_diarization, fast_diarization)
-            
-            # Regular processing for smaller files
-            return self._process_regular_file(wav_path, target_language, custom_summary_prompt, include_diarization, fast_diarization)
+            # Load and process audio
+            print("[Predict] Loading audio...")
+            audio = whisperx.load_audio(wav_path)
+            duration = len(audio) / 16000
+            print(f"[Predict] Audio loaded, duration: {duration:.1f} seconds")
 
+            # Transcribe
+            print("[Predict] Starting transcription...")
+            batch_size = 32 if self.device == "cuda" else 8
+            
+            result = self.model.transcribe(audio, batch_size=batch_size)
+            print(f"[Predict] Transcription complete. Language: {result['language']}")
+            
+            output_data["language_detected"] = result["language"]
+
+            # Align
+            print("[Predict] Aligning transcription...")
+            try:
+                model_a, metadata = whisperx.load_align_model(
+                    language_code=result["language"], 
+                    device=self.device
+                )
+                result = whisperx.align(
+                    result["segments"], 
+                    model_a, 
+                    metadata, 
+                    audio, 
+                    self.device, 
+                    return_char_alignments=False
+                )
+                print("[Predict] Alignment complete.")
+            except Exception as e:
+                print(f"[Predict] Alignment failed: {e}, continuing with unaligned segments...")
+
+            # Process segments with diarization
+            final_segments = self._process_diarization(
+                audio, result["segments"], include_diarization, fast_diarization
+            )
+            output_data["segments"] = final_segments
+
+            # Generate full text
+            full_text = " ".join([segment['text'].strip() for segment in final_segments])
+            print(f"[Predict] Generated full text ({len(full_text)} characters)")
+
+            # Translation and summarization
+            self._process_translation_and_summary(
+                output_data, full_text, target_language, custom_summary_prompt
+            )
+
+            print("[Predict] Pipeline completed successfully")
+            return output_data
+            
         except Exception as e:
             print(f"[Predict] ERROR: {type(e).__name__}: {str(e)}")
             import traceback
             traceback.print_exc()
             return {"error": str(e)}
+        
         finally:
-            if wav_path and os.path.exists(wav_path):
-                os.remove(wav_path)
-                print(f"[Predict] Cleaned up temporary file: {wav_path}")
-        
-        print("[Predict] Prediction pipeline finished successfully.")
-        return output_data
-
-    def _process_regular_file(self, wav_path, target_language, custom_summary_prompt, include_diarization, fast_diarization):
-        """Process regular-sized audio files (under 15 minutes)"""
-        output_data = {}
-        
-        # Load audio with optimization
-        print("[Predict] Loading audio...")
-        audio = whisperx.load_audio(wav_path)
-        print(f"[Predict] Audio loaded, duration: {len(audio)/16000:.1f} seconds")
-
-        # Transcribe with optimized batch size
-        print("[Predict] Starting transcription...")
-        batch_size = 32 if self.device == "cuda" else 8
-        result = self.model.transcribe(audio, batch_size=batch_size)
-        print(f"[Predict] Transcription complete. Language: {result['language']}")
-        
-        output_data["language_detected"] = result["language"]
-
-        # Align with device-specific optimization
-        print("[Predict] Aligning transcription...")
-        model_a, metadata = whisperx.load_align_model(
-            language_code=result["language"], 
-            device=self.device
-        )
-        result = whisperx.align(
-            result["segments"], 
-            model_a, 
-            metadata, 
-            audio, 
-            self.device, 
-            return_char_alignments=False
-        )
-        print("[Predict] Alignment complete.")
-
-        # Process diarization
-        final_segments = self._process_diarization(audio, result["segments"], include_diarization, fast_diarization)
-        output_data["segments"] = final_segments
-
-        # Process translation and summarization
-        full_text = " ".join([segment['text'].strip() for segment in final_segments])
-        self._process_translation_and_summary(output_data, full_text, target_language, custom_summary_prompt)
-        
-        return output_data
-
-    def _process_large_file(self, wav_path, target_language, custom_summary_prompt, include_diarization, fast_diarization):
-        """Process large audio files using chunking for better performance"""
-        from utils import chunk_audio_for_processing, merge_chunked_results, cleanup_temp_files
-        
-        # Split into chunks
-        chunk_paths = chunk_audio_for_processing(wav_path, chunk_duration_minutes=10)
-        chunk_results = []
-        
-        try:
-            for i, chunk_path in enumerate(chunk_paths):
-                print(f"[Predict] Processing chunk {i+1}/{len(chunk_paths)}...")
-                
-                # Process each chunk
-                chunk_result = self._process_regular_file(
-                    chunk_path, target_language, None, include_diarization, fast_diarization
-                )
-                chunk_results.append(chunk_result)
-            
-            # Merge chunk results
-            merged_result = merge_chunked_results(chunk_results)
-            
-            # Process translation and summarization on merged text
-            if chunk_results:
-                full_text = " ".join([segment['text'].strip() for segment in merged_result["segments"]])
-                self._process_translation_and_summary(merged_result, full_text, target_language, custom_summary_prompt)
-            
-            return merged_result
-            
-        finally:
-            # Cleanup chunk files
-            cleanup_temp_files(*chunk_paths)
+            # Cleanup
+            if wav_path and os.path.exists(wav_path) and wav_path != audio_file_path:
+                try:
+                    os.remove(wav_path)
+                    print(f"[Predict] Cleaned up: {wav_path}")
+                except:
+                    pass
 
     def _process_diarization(self, audio, segments, include_diarization, fast_diarization):
-        """Handle diarization processing with optimizations"""
-        from utils import merge_text_diarization
+        """Process diarization with error handling"""
+        if not include_diarization or self.diarize_model is None:
+            print("[Predict] Skipping diarization")
+            return [
+                {**seg, "speaker": None if not include_diarization else "SPEAKER_00"}
+                for seg in segments
+            ]
         
-        if include_diarization and self.diarize_model is not None:
-            print("[Predict] Performing speaker diarization...")
-            try:
-                if fast_diarization:
-                    print("[Predict] Using fast diarization mode...")
-                    diarize_segments = self.diarize_model(
-                        audio,
-                        min_speakers=2,
-                        max_speakers=6,
-                    )
-                else:
-                    print("[Predict] Using standard diarization mode...")
-                    diarize_segments = self.diarize_model(
-                        audio,
-                        min_speakers=2,
-                        max_speakers=10,
-                    )
-                
-                print("[Predict] Diarization complete.")
-                if not diarize_segments.empty:
-                    print(f"[Predict]  > Found {len(diarize_segments['speaker'].unique())} speakers")
-                
-                return merge_text_diarization(segments, diarize_segments)
-                
-            except Exception as e:
-                print(f"[Predict] Diarization failed: {e}. Using transcription only.")
+        print("[Predict] Processing diarization...")
+        try:
+            if self.device == "cuda":
+                torch.cuda.empty_cache()
+            
+            # Run diarization
+            diarize_segments = self.diarize_model(audio)
+            
+            if diarize_segments.empty:
+                print("[Predict] No diarization segments found")
                 return [
                     {**seg, "speaker": "SPEAKER_00"}
                     for seg in segments
                 ]
-        else:
-            if not include_diarization:
-                print("[Predict] Diarization disabled by user.")
-            else:
-                print("[Predict] Diarization model not available.")
             
+            print(f"[Predict] Found {len(diarize_segments['speaker'].unique())} speakers")
+            
+            # Merge with transcription
+            merged_segments = merge_text_diarization(segments, diarize_segments)
+            return merged_segments
+            
+        except Exception as e:
+            print(f"[Predict] Diarization failed: {e}")
             return [
-                {**seg, "speaker": "SPEAKER_00" if include_diarization else None}
+                {**seg, "speaker": "SPEAKER_00"}
                 for seg in segments
             ]
 
     def _process_translation_and_summary(self, output_data, full_text, target_language, custom_summary_prompt):
         """Handle translation and summarization"""
-        from utils import build_translate_prompt, build_summary_prompt
-        
-        # Translate
+        # Translation
         if target_language != "None" and output_data["language_detected"] != target_language:
             if self.openai_client is not None:
-                print(f"[Predict] Translating text to {target_language}...")
-                translate_prompt = build_translate_prompt(full_text, target_language)
-                response = self.openai_client.chat.completions.create(
-                    model="gpt-4o",
-                    messages=[{"role": "system", "content": "You are a professional translator."},
-                              {"role": "user", "content": translate_prompt}],
-                    temperature=0.3,
-                )
-                output_data["translation"] = response.choices[0].message.content
-                print("[Predict] Translation complete.")
+                try:
+                    print(f"[Predict] Translating to {target_language}...")
+                    translate_prompt = build_translate_prompt(full_text, target_language)
+                    
+                    response = self.openai_client.chat.completions.create(
+                        model="gpt-4o",
+                        messages=[
+                            {"role": "system", "content": "You are a professional translator."},
+                            {"role": "user", "content": translate_prompt}
+                        ],
+                        temperature=0.3,
+                    )
+                    output_data["translation"] = response.choices[0].message.content
+                    print("[Predict] Translation completed")
+                except Exception as e:
+                    print(f"[Predict] Translation failed: {e}")
+                    output_data["translation"] = f"Translation failed: {str(e)}"
             else:
                 output_data["translation"] = "Translation not available (OpenAI API key not configured)"
         
-        # Summarize
+        # Summarization
         if custom_summary_prompt and custom_summary_prompt.strip():
             if self.openai_client is not None:
-                print("[Predict] Summarizing text...")
-                summary_prompt = build_summary_prompt(full_text, custom_summary_prompt)
-                response = self.openai_client.chat.completions.create(
-                    model="gpt-4o",
-                    messages=[{"role": "system", "content": "You are a helpful assistant that summarizes text."},
-                              {"role": "user", "content": summary_prompt}],
-                    temperature=0.5,
-                )
-                output_data["summary"] = response.choices[0].message.content
-                print("[Predict] Summarization complete.")
+                try:
+                    print("[Predict] Generating summary...")
+                    summary_prompt = build_summary_prompt(full_text, custom_summary_prompt)
+                    
+                    response = self.openai_client.chat.completions.create(
+                        model="gpt-4o",
+                        messages=[
+                            {"role": "system", "content": "You are a helpful assistant that summarizes text."},
+                            {"role": "user", "content": summary_prompt}
+                        ],
+                        temperature=0.5,
+                    )
+                    output_data["summary"] = response.choices[0].message.content
+                    print("[Predict] Summary completed")
+                except Exception as e:
+                    print(f"[Predict] Summary failed: {e}")
+                    output_data["summary"] = f"Summary failed: {str(e)}"
             else:
-                output_data["summary"] = "Summarization not available (OpenAI API key not configured)"
+                output_data["summary"] = "Summary not available (OpenAI API key not configured)"
