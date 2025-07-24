@@ -156,8 +156,7 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
     submit_button.click(
         fn=gradio_interface,
         inputs=[audio_input, language_dropdown, summary_prompt_input],
-        outputs=[transcription_output, detected_language_output, translation_output, summary_output],
-        api_name="audio_processing"
+        outputs=[transcription_output, detected_language_output, translation_output, summary_output]
     )
 
 # For Hugging Face Spaces, you might want to use just Gradio without FastAPI
