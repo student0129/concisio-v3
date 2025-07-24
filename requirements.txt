@@ -1,0 +1,22 @@
+# FastAPI and Gradio for web server and UI
+fastapi
+gradio
+uvicorn[standard]
+
+# Audio processing
+pydub
+ffmpeg-python
+
+# Core ML and transcription libraries
+numpy
+torch
+whisperx @ git+https://github.com/m-bain/whisperx.git
+
+# OpenAI API for GPT-4o
+openai
+
+# Environment variable management
+python-dotenv
+
+# For diarization results
+pandas
