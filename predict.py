@@ -1,9 +1,16 @@
 import os
-import torch
+import torch  # Import torch at module level
 import whisperx
 import openai
 from pydub import AudioSegment
 from typing import Dict, List, Any, Optional
+import warnings
+
+# Suppress known warnings
+warnings.filterwarnings("ignore", category=UserWarning, module="pyannote")
+warnings.filterwarnings("ignore", category=UserWarning, module="speechbrain")
+warnings.filterwarnings("ignore", category=UserWarning, module="torchaudio")
+
 from utils import (
     convert_to_wav,
     merge_text_diarization,
@@ -23,57 +30,114 @@ class Predictor:
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.compute_type = "float16" if self.device == "cuda" else "int8"
         
-        # GPU memory optimization
-        if self.device == "cuda":
-            import torch
-            torch.backends.cudnn.benchmark = True  # Optimize for consistent input sizes
-            torch.backends.cuda.matmul.allow_tf32 = True  # Faster operations
-        
         print(f"Initializing Predictor on {self.device} with {self.compute_type} compute type")
+        
+        # GPU memory optimization and error handling
         if self.device == "cuda":
-            print(f"GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f} GB")
-
-        # Use smaller model if on CPU for better performance
-        model_size = "large-v2" if self.device == "cuda" else "base"
+            try:
+                # Clear any existing GPU memory
+                torch.cuda.empty_cache()
+                
+                # Set memory management
+                torch.backends.cudnn.benchmark = True
+                torch.backends.cuda.matmul.allow_tf32 = True
+                
+                # Check GPU memory
+                gpu_memory = torch.cuda.get_device_properties(0).total_memory / 1024**3
+                print(f"GPU Memory: {gpu_memory:.1f} GB")
+                
+                # Set memory fraction to prevent OOM for T4
+                if gpu_memory < 20:  # For T4 (16GB)
+                    torch.cuda.set_per_process_memory_fraction(0.75)
+                    print("Set GPU memory fraction to 75% for T4 optimization")
+                    
+            except Exception as e:
+                print(f"GPU setup warning: {e}")
+                # Don't fallback to CPU immediately, try to continue
         
-        print(f"Loading Whisper model: {model_size}...")
-        self.model = whisperx.load_model(
-            model_size, 
-            self.device, 
-            compute_type=self.compute_type,
-            download_root=None,  # Use default cache
-            threads=4 if self.device == "cpu" else None  # Optimize CPU threading
-        )
-        print("Whisper model loaded.")
+        # Load models with fallback strategy
+        self._load_whisper_model()
+        self._load_diarization_model()
+        self._initialize_openai_client()
         
-        # Initialize diarization model with optimizations
+        print("Predictor initialized successfully.")
+    
+    def _load_whisper_model(self):
+        """Load Whisper model with GPU memory fallback"""
+        model_attempts = [
+            ("large-v2", "float16") if self.device == "cuda" else ("base", "int8"),
+            ("medium", "float16") if self.device == "cuda" else ("base", "int8"),
+            ("base", "float16") if self.device == "cuda" else ("base", "int8"),
+        ]
+        
+        for model_size, compute_type in model_attempts:
+            try:
+                print(f"Loading Whisper model: {model_size} with {compute_type}...")
+                
+                if self.device == "cuda":
+                    torch.cuda.empty_cache()  # Clear memory before loading
+                
+                self.model = whisperx.load_model(
+                    model_size, 
+                    self.device, 
+                    compute_type=compute_type,
+                    download_root=None,
+                    threads=4 if self.device == "cpu" else None
+                )
+                print(f"Whisper model {model_size} loaded successfully.")
+                return
+                
+            except RuntimeError as e:
+                if "out of memory" in str(e).lower() and self.device == "cuda":
+                    print(f"GPU memory insufficient for {model_size}, trying smaller model...")
+                    continue
+                else:
+                    print(f"Error loading {model_size}: {e}")
+                    if model_size == "base":  # Last attempt failed
+                        # Try CPU as final fallback
+                        print("Switching to CPU mode...")
+                        self.device = "cpu"
+                        self.compute_type = "int8"
+                        self.model = whisperx.load_model("base", "cpu", compute_type="int8")
+                        return
+            except Exception as e:
+                print(f"Unexpected error loading {model_size}: {e}")
+                continue
+        
+        raise Exception("Failed to load any Whisper model")
+    
+    def _load_diarization_model(self):
+        """Load diarization model with error handling"""
         print("Loading Diarization model...")
         try:
             hf_token = os.getenv("HF_TOKEN")
             if not hf_token:
                 print("Warning: HF_TOKEN not found. Diarization may not work properly.")
             
-            # Optimized diarization pipeline
+            # Clear GPU memory before loading diarization model
+            if self.device == "cuda":
+                torch.cuda.empty_cache()
+            
             self.diarize_model = whisperx.DiarizationPipeline(
                 use_auth_token=hf_token, 
                 device=self.device,
-                # Performance optimizations
-                cache_dir=None,  # Use default cache
+                cache_dir=None,
             )
-            print("Diarization model loaded.")
+            print("Diarization model loaded successfully.")
+            
         except Exception as e:
             print(f"Warning: Could not load diarization model: {e}")
+            print("Continuing without diarization capability...")
             self.diarize_model = None
-
-        # Initialize OpenAI client
+    
+    def _initialize_openai_client(self):
+        """Initialize OpenAI client"""
         openai_key = os.getenv("OPENAI_API_KEY")
         if not openai_key:
             print("Warning: OPENAI_API_KEY not found. Translation and summarization will not work.")
             self.openai_client = None
         else:
             self.openai_client = openai.OpenAI(api_key=openai_key)
-            
-        print("Predictor initialized successfully.")
 
     def predict(
         self, 
