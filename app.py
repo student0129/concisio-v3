@@ -127,7 +127,7 @@ def gradio_interface(audio, language_name, prompt):
 iface = gr.Interface(
     fn=gradio_interface,
     inputs=[
-        gr.Audio(source="upload", type="filepath", label="Upload Audio File"),
+        gr.Audio(type="filepath", label="Upload Audio File"),
         gr.Dropdown(
             choices=list(LANGUAGES.keys()), 
             value="No Translation",
