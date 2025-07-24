@@ -13,49 +13,26 @@ def convert_to_wav(input_path):
     Returns:
         str: Path to the converted temporary WAV file.
     """
+    print(f"[Utils] Starting WAV conversion for: {input_path}")
     # Load the audio file
     audio = AudioSegment.from_file(input_path)
+    print(f"[Utils]  > Original audio info: {audio.channels} channels, {audio.frame_rate} Hz")
     
     # Set to mono
     audio = audio.set_channels(1)
     
     # Set to 16kHz sample rate
     audio = audio.set_frame_rate(16000)
+    print(f"[Utils]  > Converted audio info: {audio.channels} channel(s), {audio.frame_rate} Hz")
     
     # Create a temporary file to store the WAV output
-    # The file will be created in the default temporary directory
     temp_wav = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
     
     # Export the audio to WAV format
     audio.export(temp_wav.name, format="wav")
+    print(f"[Utils]  > Exported to temporary WAV file: {temp_wav.name}")
     
     return temp_wav.name
-
-def split_chunks(wav_path, max_duration_seconds=1200):
-    """
-    Splits a WAV file into smaller chunks.
-    Note: This is not currently used in predict.py but is included for future use
-    with very long audio files, as per the original specification.
-
-    Args:
-        wav_path (str): Path to the input WAV file.
-        max_duration_seconds (int): Maximum duration of each chunk in seconds (default 20 mins).
-
-    Returns:
-        list: A list of paths to the audio chunks.
-    """
-    audio = AudioSegment.from_wav(wav_path)
-    duration_ms = len(audio)
-    max_duration_ms = max_duration_seconds * 1000
-    
-    chunks = []
-    for i in range(0, duration_ms, max_duration_ms):
-        chunk = audio[i:i + max_duration_ms]
-        chunk_path = f"temp_chunk_{i // max_duration_ms}.wav"
-        chunk.export(chunk_path, format="wav")
-        chunks.append(chunk_path)
-        
-    return chunks
 
 def merge_text_diarization(aligned_segments, diarize_segments):
     """
@@ -68,10 +45,18 @@ def merge_text_diarization(aligned_segments, diarize_segments):
     Returns:
         list: A list of segments, each with 'text', 'start', 'end', and 'speaker'.
     """
-    from whisperx.lib import assign_word_speakers # Import locally to avoid circular deps if utils is larger
+    print("[Utils] Starting merge of transcription and diarization...")
+    print(f"[Utils]  > Received {len(aligned_segments)} aligned segments.")
+    print(f"[Utils]  > Received {len(diarize_segments)} diarization segments.")
+
+    from whisperx.lib import assign_word_speakers
 
     # Assign speaker labels to each word
     result_segments_w_speakers = assign_word_speakers(diarize_segments, aligned_segments)
+    print("[Utils]  > Assigned speakers to words.")
+    if result_segments_w_speakers["segments"] and "words" in result_segments_w_speakers["segments"][0]:
+         print(f"[Utils]  > Sample of first segment with word speakers: {result_segments_w_speakers['segments'][0]['words'][:5]}")
+
 
     # Re-segment the text based on speaker turns
     final_segments = []
@@ -79,29 +64,38 @@ def merge_text_diarization(aligned_segments, diarize_segments):
     segment_text = ""
     segment_start = 0
 
+    if not result_segments_w_speakers.get("segments"):
+        print("[Utils]  > No segments found after speaker assignment. Returning empty list.")
+        return final_segments
+
+    # Find the first word with a speaker to initialize
+    for segment in result_segments_w_speakers.get("segments", []):
+        if "words" in segment:
+            for word_info in segment.get("words", []):
+                if "speaker" in word_info and "start" in word_info:
+                    current_speaker = word_info["speaker"]
+                    segment_start = word_info["start"]
+                    break
+            if current_speaker:
+                break
+    
+    print(f"[Utils]  > Starting re-segmentation with initial speaker: {current_speaker}")
+
     for segment in result_segments_w_speakers["segments"]:
         if "words" not in segment:
             continue
 
         for word_info in segment["words"]:
-            if "speaker" not in word_info:
-                # If a word has no speaker, continue with the previous one
-                word_info["speaker"] = current_speaker if current_speaker else "UNKNOWN"
-
-            if current_speaker is None:
-                # Start of the first segment
-                current_speaker = word_info["speaker"]
-                segment_start = word_info["start"]
+            if "speaker" not in word_info or "start" not in word_info or "word" not in word_info:
+                continue
 
             if current_speaker != word_info["speaker"]:
-                # End of the current segment, start of a new one
                 final_segments.append({
                     "text": segment_text.strip(),
                     "start": segment_start,
-                    "end": word_info["start"], # The new word's start is the previous segment's end
+                    "end": word_info["start"],
                     "speaker": current_speaker
                 })
-                # Start the new segment
                 current_speaker = word_info["speaker"]
                 segment_text = ""
                 segment_start = word_info["start"]
@@ -110,49 +104,39 @@ def merge_text_diarization(aligned_segments, diarize_segments):
     
     # Add the last segment
     if segment_text:
-        # To get the end time of the last segment, we find the last word's end time
-        last_word_end = result_segments_w_speakers["segments"][-1]["words"][-1]["end"]
+        last_word_end = result_segments_w_speakers["segments"][-1]["words"][-1].get("end", segment_start)
         final_segments.append({
             "text": segment_text.strip(),
             "start": segment_start,
             "end": last_word_end,
             "speaker": current_speaker
         })
-
+    
+    print(f"[Utils] Merge complete. Generated {len(final_segments)} final segments.")
     return final_segments
 
 
 def build_translate_prompt(text, target_language):
     """
     Builds the prompt for the OpenAI API to perform translation.
-
-    Args:
-        text (str): The text to be translated.
-        target_language (str): The target language code (e.g., 'es', 'fr').
-
-    Returns:
-        str: The formatted prompt.
     """
-    return (
+    prompt = (
         f"Translate the following text into {target_language}. "
         "Preserve the original meaning and intent. "
         "Do not add any extra commentary or explanation, only provide the translation.\n\n"
         f"Text to translate:\n---\n{text}"
     )
+    print(f"[Utils] Built translation prompt (first 100 chars): '{prompt[:100]}...'")
+    return prompt
 
 def build_summary_prompt(text, custom_prompt):
     """
     Builds the prompt for the OpenAI API to perform summarization.
-
-    Args:
-        text (str): The text to be summarized.
-        custom_prompt (str): The user-provided prompt for summarization.
-
-    Returns:
-        str: The formatted prompt.
     """
-    return (
+    prompt = (
         f"You are a helpful assistant that summarizes text based on a user's request.\n\n"
         f"User's request: '{custom_prompt}'\n\n"
         f"Based on this request, please summarize the following text:\n---\n{text}"
     )
+    print(f"[Utils] Built summary prompt (first 100 chars): '{prompt[:100]}...'")
+    return prompt
