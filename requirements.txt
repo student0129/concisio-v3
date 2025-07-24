@@ -1,11 +1,15 @@
-# Streamlit for web UI (much more stable than Gradio)
+# Streamlit for web UI
 streamlit
 
-# Core ML and transcription libraries
-torch
-torchaudio
+# IMPORTANT: Install torch first with specific CUDA version
+torch==2.0.1+cu118
+torchaudio==2.0.2+cu118
+--extra-index-url https://download.pytorch.org/whl/cu118
+
+# Core ML libraries with compatible versions
 whisperx
-pyannote.audio==3.1.1
+pyannote.audio==3.0.1
+speechbrain==0.5.16
 
 # Other dependencies
 pydub
@@ -14,3 +18,29 @@ openai
 python-dotenv
 pandas
 numpy
+
+# Additional support
+accelerate
+transformers# Streamlit for web UI
+streamlit
+
+# Core ML and transcription libraries - GPU optimized versions
+torch>=2.0.0
+torchaudio>=2.0.0
+whisperx
+pyannote.audio==3.1.1
+
+# CUDA-specific packages (automatically installs correct versions)
+--extra-index-url https://download.pytorch.org/whl/cu118
+
+# Other dependencies
+pydub
+ffmpeg-python
+openai
+python-dotenv
+pandas
+numpy
+
+# Additional GPU support
+accelerate
+transformers
