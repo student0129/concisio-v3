@@ -20,8 +20,13 @@ class Predictor:
         """
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.compute_type = "float16" if self.device == "cuda" else "int8"
+
+        print(f"Initializing Predictor on {self.device}")
+
+        # Use smaller model if on CPU for better performance
+        model_size = "large-v2" if self.device == "cuda" else "base"
         
-        self.model = whisperx.load_model("large-v2", self.device, compute_type=self.compute_type)
+        self.model = whisperx.load_model(model_size, self.device, compute_type=self.compute_type)
         self.diarize_model = whisperx.diarize.DiarizationPipeline(use_auth_token=os.getenv("HF_TOKEN"), device=self.device)
         self.openai_client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
