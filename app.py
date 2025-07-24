@@ -1,6 +1,5 @@
 import os
 import gradio as gr
-from fastapi import FastAPI
 from dotenv import load_dotenv
 from predict import Predictor 
 
@@ -32,16 +31,12 @@ LANGUAGES = {
     "Korean": "ko"
 }
 
-# Initialize FastAPI app
-app = FastAPI()
-
 # Initialize the predictor
 predictor = Predictor()
 
-def process_audio(audio_file, target_language, custom_prompt):
+def process_audio_file(audio_file, target_language, custom_prompt):
     """
-    Gradio interface function to process the uploaded audio.
-    Transcription is now always performed. Translation is optional.
+    Process the uploaded audio file for transcription, translation, and summarization.
     """
     if audio_file is None:
         return "Please upload an audio file first.", "", "", ""
@@ -65,8 +60,15 @@ def process_audio(audio_file, target_language, custom_prompt):
 
     return segments_formatted, language_detected, translation, summary
 
+def gradio_interface(audio, language_name, prompt):
+    """
+    Wrapper function for Gradio interface.
+    """
+    language_code = LANGUAGES.get(language_name, "None")
+    return process_audio_file(audio, language_code, prompt)
+
 # Create the Gradio Interface
-with gr.Blocks(theme=gr.themes.Soft()) as interface:
+with gr.Blocks(theme=gr.themes.Soft()) as demo:
     gr.Markdown("# Concisio App")
     gr.Markdown("Upload an audio file to transcribe, diarize, and optionally translate or summarize.")
 
@@ -93,27 +95,16 @@ with gr.Blocks(theme=gr.themes.Soft()) as interface:
             transcription_output = gr.Textbox(label="Transcription & Diarization", lines=15, interactive=False)
             translation_output = gr.Textbox(label="Translation", lines=5, interactive=False)
             summary_output = gr.Textbox(label="Summary", lines=5, interactive=False)
-    
-    # --- API ERROR FIX ---
-    # Using a dedicated wrapper function instead of a lambda to ensure Gradio's
-    # API generator can correctly parse the function and its inputs.
-    def gradio_wrapper(audio, lang_name, prompt):
-        """
-        A wrapper function to handle the inputs from the Gradio interface
-        and pass them to the main processing function.
-        """
-        lang_code = LANGUAGES.get(lang_name, "None")
-        return process_audio(audio, lang_code, prompt)
 
+    # Set up the click event with a unique API name
     submit_button.click(
-        fn=gradio_wrapper, # Use the named wrapper function
+        fn=gradio_interface,
         inputs=[audio_input, language_dropdown, summary_prompt_input],
         outputs=[transcription_output, detected_language_output, translation_output, summary_output],
-        api_name="process_audio" 
+        api_name="audio_processing"
     )
 
-app = gr.mount_gradio_app(app, interface, path="/")
-
+# For Hugging Face Spaces, you might want to use just Gradio without FastAPI
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=7860)
+    # Launching Gradio directly is more stable for Hugging Face Spaces
+    demo.launch(server_name="0.0.0.0", server_port=7860)
