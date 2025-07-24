@@ -8,9 +8,8 @@ pydub
 ffmpeg-python
 
 # Core ML and transcription libraries
-numpy
 torch
-whisperx @ git+https://github.com/m-bain/whisperx.git
+whisperx
 
 # OpenAI API for GPT-4o
 openai
