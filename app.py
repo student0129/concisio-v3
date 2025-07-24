@@ -2,6 +2,7 @@ import os
 import gradio as gr
 from dotenv import load_dotenv
 from datetime import datetime
+import logging
 
 # Load environment variables from .env file
 load_dotenv()
@@ -10,15 +11,16 @@ load_dotenv()
 print("Starting Concisio App...")
 print(f"Environment variables loaded: HF_TOKEN={'HF_TOKEN' in os.environ}, OPENAI_API_KEY={'OPENAI_API_KEY' in os.environ}")
 
+# Initialize predictor with better error handling
+predictor = None
 try:
     from predict import Predictor
     predictor = Predictor()
     print("Predictor initialized successfully")
 except Exception as e:
     print(f"Error initializing Predictor: {e}")
+    # Don't raise here - let the app start and show error in UI
     predictor = None
-    # You might want to show an error in the UI
-    raise
 
 # Default summarization prompt
 DEFAULT_SUMMARY_PROMPT = """Please provide a structured summary of the conversation with the following sections:
@@ -49,6 +51,10 @@ def process_audio_file(audio_file, target_language, custom_prompt):
     """
     Process the uploaded audio file for transcription, translation, and summarization.
     """
+    # Check if predictor is available
+    if predictor is None:
+        return "Error: Predictor not initialized. Please check the logs for initialization errors.", "", "", ""
+    
     # Debug: Initial state
     print(f"\n{'='*50}")
     print(f"Processing started at: {datetime.now()}")
@@ -121,43 +127,56 @@ def gradio_interface(audio, language_name, prompt):
     language_code = LANGUAGES.get(language_name, "None")
     return process_audio_file(audio, language_code, prompt)
 
-# Create the Gradio Interface
-with gr.Blocks(theme=gr.themes.Soft()) as demo:
-    gr.Markdown("# Concisio App")
-    gr.Markdown("Upload an audio file to transcribe, diarize, and optionally translate or summarize.")
+# Create the Gradio Interface with error handling
+try:
+    with gr.Blocks(theme=gr.themes.Soft()) as demo:
+        gr.Markdown("# Concisio App")
+        gr.Markdown("Upload an audio file to transcribe, diarize, and optionally translate or summarize.")
 
-    with gr.Row():
-        with gr.Column(scale=1):
-            audio_input = gr.Audio(type="filepath", label="Upload Audio File")
-            
-            gr.Markdown("### Options")
-            language_dropdown = gr.Dropdown(
-                choices=list(LANGUAGES.keys()), 
-                value="No Translation",
-                label="Translate to (Optional)",
-            )
-            summary_prompt_input = gr.Textbox(
-                label="Summarization Prompt (Leave blank to skip)",
-                value=DEFAULT_SUMMARY_PROMPT,
-                lines=8,
-            )
-            submit_button = gr.Button("Process Audio", variant="primary")
+        with gr.Row():
+            with gr.Column(scale=1):
+                audio_input = gr.Audio(type="filepath", label="Upload Audio File")
+                
+                gr.Markdown("### Options")
+                language_dropdown = gr.Dropdown(
+                    choices=list(LANGUAGES.keys()), 
+                    value="No Translation",
+                    label="Translate to (Optional)",
+                )
+                summary_prompt_input = gr.Textbox(
+                    label="Summarization Prompt (Leave blank to skip)",
+                    value=DEFAULT_SUMMARY_PROMPT,
+                    lines=8,
+                )
+                submit_button = gr.Button("Process Audio", variant="primary")
 
-        with gr.Column(scale=2):
-            gr.Markdown("### Results")
-            detected_language_output = gr.Textbox(label="Detected Language", interactive=False)
-            transcription_output = gr.Textbox(label="Transcription & Diarization", lines=15, interactive=False)
-            translation_output = gr.Textbox(label="Translation", lines=5, interactive=False)
-            summary_output = gr.Textbox(label="Summary", lines=5, interactive=False)
+            with gr.Column(scale=2):
+                gr.Markdown("### Results")
+                detected_language_output = gr.Textbox(label="Detected Language", interactive=False)
+                transcription_output = gr.Textbox(label="Transcription & Diarization", lines=15, interactive=False)
+                translation_output = gr.Textbox(label="Translation", lines=5, interactive=False)
+                summary_output = gr.Textbox(label="Summary", lines=5, interactive=False)
 
-    # Set up the click event with a unique API name
-    submit_button.click(
-        fn=gradio_interface,
-        inputs=[audio_input, language_dropdown, summary_prompt_input],
-        outputs=[transcription_output, detected_language_output, translation_output, summary_output],
-        api_name="audio_processing"  # This line is the critical fix
-    )
+        # Set up the click event
+        submit_button.click(
+            fn=gradio_interface,
+            inputs=[audio_input, language_dropdown, summary_prompt_input],
+            outputs=[transcription_output, detected_language_output, translation_output, summary_output]
+        )
 
-# For Hugging Face Spaces, you might want to use just Gradio without FastAPI
+    print("Gradio interface created successfully")
+
+except Exception as e:
+    print(f"Error creating Gradio interface: {e}")
+    import traceback
+    traceback.print_exc()
+    
+    # Create a simple error interface
+    with gr.Blocks() as demo:
+        gr.Markdown("# Error Loading App")
+        gr.Markdown(f"There was an error loading the application: {str(e)}")
+        gr.Markdown("Please check the logs for more details.")
+
+# For Hugging Face Spaces
 if __name__ == "__main__":
     demo.launch()
