@@ -19,28 +19,46 @@ class Predictor:
         """
         Initializes the Predictor by loading necessary models and setting up the API client.
         """
+        # Enhanced GPU detection and optimization
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.compute_type = "float16" if self.device == "cuda" else "int8"
-
+        
+        # GPU memory optimization
+        if self.device == "cuda":
+            import torch
+            torch.backends.cudnn.benchmark = True  # Optimize for consistent input sizes
+            torch.backends.cuda.matmul.allow_tf32 = True  # Faster operations
+        
         print(f"Initializing Predictor on {self.device} with {self.compute_type} compute type")
+        if self.device == "cuda":
+            print(f"GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f} GB")
 
         # Use smaller model if on CPU for better performance
         model_size = "large-v2" if self.device == "cuda" else "base"
         
         print(f"Loading Whisper model: {model_size}...")
-        self.model = whisperx.load_model(model_size, self.device, compute_type=self.compute_type)
+        self.model = whisperx.load_model(
+            model_size, 
+            self.device, 
+            compute_type=self.compute_type,
+            download_root=None,  # Use default cache
+            threads=4 if self.device == "cpu" else None  # Optimize CPU threading
+        )
         print("Whisper model loaded.")
         
-        # Initialize diarization model with better error handling
+        # Initialize diarization model with optimizations
         print("Loading Diarization model...")
         try:
             hf_token = os.getenv("HF_TOKEN")
             if not hf_token:
                 print("Warning: HF_TOKEN not found. Diarization may not work properly.")
             
+            # Optimized diarization pipeline
             self.diarize_model = whisperx.DiarizationPipeline(
                 use_auth_token=hf_token, 
-                device=self.device
+                device=self.device,
+                # Performance optimizations
+                cache_dir=None,  # Use default cache
             )
             print("Diarization model loaded.")
         except Exception as e:
@@ -61,7 +79,9 @@ class Predictor:
         self, 
         audio_file_path: str, 
         target_language: str = "None", 
-        custom_summary_prompt: Optional[str] = None
+        custom_summary_prompt: Optional[str] = None,
+        include_diarization: bool = True,
+        fast_diarization: bool = False
     ) -> Dict[str, Any]:
         """
         Runs the full prediction pipeline.
@@ -70,6 +90,8 @@ class Predictor:
             audio_file_path: Path to the audio file
             target_language: Target language code for translation
             custom_summary_prompt: Custom prompt for summarization
+            include_diarization: Whether to perform speaker diarization
+            fast_diarization: Whether to use fast diarization mode
             
         Returns:
             Dictionary containing the results or error information
@@ -78,6 +100,8 @@ class Predictor:
         print(f"\n[Predict] Starting prediction pipeline")
         print(f"[Predict] Audio file: {audio_file_path}")
         print(f"[Predict] Target language: {target_language}")
+        print(f"[Predict] Include diarization: {include_diarization}")
+        print(f"[Predict] Custom prompt provided: {bool(custom_summary_prompt and custom_summary_prompt.strip())}")
     
         output_data = {}
         wav_path = None
@@ -88,37 +112,71 @@ class Predictor:
             wav_path = convert_to_wav(audio_file_path)
             print(f"[Predict] WAV path: {wav_path}")
             
-            # Load audio
+            # Load audio with optimization
             print("[Predict] Loading audio...")
             audio = whisperx.load_audio(wav_path)
             print(f"[Predict] Audio loaded, duration: {len(audio)/16000:.1f} seconds")
 
-            # Transcribe
+            # Transcribe with optimized batch size
             print("[Predict] Starting transcription...")
-            result = self.model.transcribe(audio, batch_size=16)
+            batch_size = 32 if self.device == "cuda" else 8  # Optimize batch size for device
+            result = self.model.transcribe(audio, batch_size=batch_size)
             print(f"[Predict] Transcription complete. Language: {result['language']}")
             if result['segments']:
                 print(f"[Predict]  > Sample segment: {result['segments'][0]['text']}")
         
             output_data["language_detected"] = result["language"]
 
-            # Align
+            # Align with device-specific optimization
             print("[Predict] Aligning transcription...")
-            model_a, metadata = whisperx.load_align_model(language_code=result["language"], device=self.device)
-            result = whisperx.align(result["segments"], model_a, metadata, audio, self.device, return_char_alignments=False)
+            model_a, metadata = whisperx.load_align_model(
+                language_code=result["language"], 
+                device=self.device
+            )
+            result = whisperx.align(
+                result["segments"], 
+                model_a, 
+                metadata, 
+                audio, 
+                self.device, 
+                return_char_alignments=False
+            )
             print("[Predict] Alignment complete.")
             if result['segments']:
                  print(f"[Predict]  > Sample aligned segment: {result['segments'][0]['text']}")
 
-            # Diarize (with fallback if model not available)
+            # Diarize with performance optimizations
             final_segments = []
-            if self.diarize_model is not None:
+            if include_diarization and self.diarize_model is not None:
                 print("[Predict] Performing speaker diarization...")
                 try:
-                    diarize_segments = self.diarize_model(audio)
+                    # Optimize diarization parameters based on mode
+                    if fast_diarization:
+                        print("[Predict] Using fast diarization mode...")
+                        # Fast mode with reduced accuracy but better speed
+                        if hasattr(self.diarize_model, '__call__'):
+                            diarize_segments = self.diarize_model(
+                                audio,
+                                min_speakers=2,
+                                max_speakers=6,  # Reduced max speakers for speed
+                            )
+                        else:
+                            diarize_segments = self.diarize_model(audio)
+                    else:
+                        print("[Predict] Using standard diarization mode...")
+                        # Standard mode with full accuracy
+                        if hasattr(self.diarize_model, '__call__'):
+                            diarize_segments = self.diarize_model(
+                                audio,
+                                min_speakers=2,
+                                max_speakers=10,
+                            )
+                        else:
+                            diarize_segments = self.diarize_model(audio)
+                    
                     print("[Predict] Diarization complete.")
                     if not diarize_segments.empty:
-                        print(f"[Predict]  > Found {len(diarize_segments['speaker'].unique())} speakers. Sample diarization: {diarize_segments.iloc[0].to_dict()}")
+                        print(f"[Predict]  > Found {len(diarize_segments['speaker'].unique())} speakers")
                     
                     # Merge
                     print("[Predict] Merging transcription and diarization...")
@@ -134,11 +192,14 @@ class Predictor:
                         for seg in result["segments"]
                     ]
             else:
-                print("[Predict] Diarization model not available. Using transcription only.")
+                if not include_diarization:
+                    print("[Predict] Diarization disabled by user. Using transcription only.")
+                else:
+                    print("[Predict] Diarization model not available. Using transcription only.")
                 final_segments = [
                     {
                         **seg,
-                        "speaker": "SPEAKER_00"
+                        "speaker": "SPEAKER_00" if include_diarization else None
                     }
                     for seg in result["segments"]
                 ]
