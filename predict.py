@@ -21,14 +21,22 @@ class Predictor:
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.compute_type = "float16" if self.device == "cuda" else "int8"
 
-        print(f"Initializing Predictor on {self.device}")
+        print(f"Initializing Predictor on {self.device} with {self.compute_type} compute type")
 
         # Use smaller model if on CPU for better performance
         model_size = "large-v2" if self.device == "cuda" else "base"
         
+        print(f"Loading Whisper model: {model_size}...")
         self.model = whisperx.load_model(model_size, self.device, compute_type=self.compute_type)
+        print("Whisper model loaded.")
+        
+        print("Loading Diarization model...")
         self.diarize_model = whisperx.diarize.DiarizationPipeline(use_auth_token=os.getenv("HF_TOKEN"), device=self.device)
+        print("Diarization model loaded.")
+
         self.openai_client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        print("Predictor initialized successfully.")
+
 
     def predict(self, audio_file_path, target_language="None", custom_summary_prompt=None):
         """
@@ -58,22 +66,46 @@ class Predictor:
             print("[Predict] Starting transcription...")
             result = self.model.transcribe(audio, batch_size=16)
             print(f"[Predict] Transcription complete. Language: {result['language']}")
+            if result['segments']:
+                print(f"[Predict]  > Sample segment: {result['segments'][0]['text']}")
         
             output_data["language_detected"] = result["language"]
 
+            # Align
+            print("[Predict] Aligning transcription...")
             model_a, metadata = whisperx.load_align_model(language_code=result["language"], device=self.device)
             result = whisperx.align(result["segments"], model_a, metadata, audio, self.device, return_char_alignments=False)
+            print("[Predict] Alignment complete.")
+            if result['segments']:
+                 print(f"[Predict]  > Sample aligned segment: {result['segments'][0]['text']}")
 
+
+            # Diarize
+            print("[Predict] Performing speaker diarization...")
             diarize_segments = self.diarize_model(audio)
+            print("[Predict] Diarization complete.")
+            if not diarize_segments.empty:
+                print(f"[Predict]  > Found {len(diarize_segments['speaker'].unique())} speakers. Sample diarization: {diarize_segments.iloc[0].to_dict()}")
+
             
+            # Merge
+            print("[Predict] Merging transcription and diarization...")
             final_segments = merge_text_diarization(result["segments"], diarize_segments)
             output_data["segments"] = final_segments
+            print("[Predict] Merging complete.")
+            if final_segments:
+                print(f"[Predict]  > Sample final segment: {final_segments[0]}")
+
 
             full_text = " ".join([segment['text'].strip() for segment in final_segments])
+            print(f"[Predict] Generated full text for API calls (first 100 chars): '{full_text[:100]}...'")
 
-            # Logic is updated to check if a valid language was selected from the dropdown.
+
+            # Translate
             if target_language != "None" and output_data["language_detected"] != target_language:
+                print(f"[Predict] Translating text to {target_language}...")
                 translate_prompt = build_translate_prompt(full_text, target_language)
+                print(f"[Predict]  > OpenAI Translate Prompt: '{translate_prompt[:150]}...'")
                 response = self.openai_client.chat.completions.create(
                     model="gpt-4o",
                     messages=[{"role": "system", "content": "You are a professional translator."},
@@ -81,9 +113,13 @@ class Predictor:
                     temperature=0.3,
                 )
                 output_data["translation"] = response.choices[0].message.content
+                print("[Predict] Translation complete.")
             
+            # Summarize
             if custom_summary_prompt and custom_summary_prompt.strip():
+                print("[Predict] Summarizing text...")
                 summary_prompt = build_summary_prompt(full_text, custom_summary_prompt)
+                print(f"[Predict]  > OpenAI Summary Prompt: '{summary_prompt[:150]}...'")
                 response = self.openai_client.chat.completions.create(
                     model="gpt-4o",
                     messages=[{"role": "system", "content": "You are a helpful assistant that summarizes text."},
@@ -91,6 +127,7 @@ class Predictor:
                     temperature=0.5,
                 )
                 output_data["summary"] = response.choices[0].message.content
+                print("[Predict] Summarization complete.")
 
         except Exception as e:
             print(f"[Predict] ERROR: {type(e).__name__}: {str(e)}")
@@ -100,5 +137,7 @@ class Predictor:
         finally:
             if wav_path and os.path.exists(wav_path):
                 os.remove(wav_path)
-
+                print(f"[Predict] Cleaned up temporary file: {wav_path}")
+        
+        print("[Predict] Prediction pipeline finished successfully.")
         return output_data
