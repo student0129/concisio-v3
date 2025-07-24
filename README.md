@@ -1,3 +1,14 @@
+---
+title: WhisperX GPT App
+emoji: 🎤
+colorFrom: indigo
+colorTo: purple
+sdk: gradio
+sdk_version: "4.29.0"
+app_file: app.py
+pinned: false
+---
+
 # WhisperX GPT App
 
 This web application provides a user-friendly interface to transcribe, diarize, translate, and summarize audio files using a powerful pipeline of WhisperX and OpenAI's GPT-4o.
