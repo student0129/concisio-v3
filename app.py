@@ -1,6 +1,7 @@
 import os
 import gradio as gr
 from dotenv import load_dotenv
+from datetime import datetime
 
 # Load environment variables from .env file
 load_dotenv()
@@ -43,9 +44,6 @@ LANGUAGES = {
     "Japanese": "ja",
     "Korean": "ko"
 }
-
-# Initialize the predictor
-predictor = Predictor()
 
 def process_audio_file(audio_file, target_language, custom_prompt):
     """
