@@ -1,4 +1,8 @@
 streamlit
+whisperx
+pyannote.audio
+openai
+python-dotenvstreamlit
 whisperx>=3.4.2
 pyannote.audio
 openai
