@@ -5,6 +5,8 @@ import warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="pyannote")
 warnings.filterwarnings("ignore", category=UserWarning, module="speechbrain")
 warnings.filterwarnings("ignore", category=UserWarning, module="torchaudio")
+warnings.filterwarnings("ignore", message=".*audio is shorter than 30s.*")
+warnings.filterwarnings("ignore", message=".*language detection may be inaccurate.*")
 
 # Import torch and related libraries
 try:
