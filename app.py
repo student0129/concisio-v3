@@ -7,7 +7,14 @@ from predict import Predictor
 # Load environment variables from .env file
 load_dotenv()
 
-# Dictionary of languages for the dropdown, with full names.
+# (4) New default summarization prompt
+DEFAULT_SUMMARY_PROMPT = """Please provide a structured summary of the conversation with the following sections:
+- **Background:** Briefly describe the context of the discussion.
+- **Key Discussion Points:** List the main topics and what was said by each speaker.
+- **Decisions Made:** Detail any decisions that were reached.
+- **Next Steps:** Outline the action items, who is responsible, and the deadlines."""
+
+# (1) Dictionary of languages for the dropdown, with full names.
 LANGUAGES = {
     "No Translation": "None",
     "English": "en",
@@ -60,7 +67,8 @@ def process_audio(audio_file, target_language, custom_prompt):
 
 # Create the Gradio Interface
 with gr.Blocks(theme=gr.themes.Soft()) as interface:
-    gr.Markdown("# WhisperX GPT App")
+    # (3) Changed the name of the app
+    gr.Markdown("# Concisio App")
     gr.Markdown("Upload an audio file to transcribe, diarize, and optionally translate or summarize.")
 
     with gr.Row():
@@ -68,20 +76,22 @@ with gr.Blocks(theme=gr.themes.Soft()) as interface:
             audio_input = gr.Audio(type="filepath", label="Upload Audio File")
             
             gr.Markdown("### Options")
+            # (1) Updated language dropdown
             language_dropdown = gr.Dropdown(
                 choices=list(LANGUAGES.keys()), 
                 value="No Translation",
                 label="Translate to (Optional)",
             )
+            # (4) Updated summary prompt textbox
             summary_prompt_input = gr.Textbox(
-                label="Summarization Prompt (Optional)",
-                placeholder="e.g., Summarize the key decisions from this meeting."
+                label="Summarization Prompt (Leave blank to skip)",
+                value=DEFAULT_SUMMARY_PROMPT,
+                lines=8, # Increased lines to show the full default prompt
             )
             submit_button = gr.Button("Process Audio", variant="primary")
 
         with gr.Column(scale=2):
             gr.Markdown("### Results")
-            # Re-adding interactive=False as it's best practice for outputs
             detected_language_output = gr.Textbox(label="Detected Language", interactive=False)
             transcription_output = gr.Textbox(label="Transcription & Diarization", lines=15, interactive=False)
             translation_output = gr.Textbox(label="Translation", lines=5, interactive=False)
@@ -90,12 +100,12 @@ with gr.Blocks(theme=gr.themes.Soft()) as interface:
     def get_lang_code(lang_name):
         return LANGUAGES.get(lang_name, "None")
 
+    # (2) Added api_name to fix the "No API found" error
     submit_button.click(
         fn=lambda audio, lang_name, prompt: process_audio(audio, get_lang_code(lang_name), prompt),
         inputs=[audio_input, language_dropdown, summary_prompt_input],
         outputs=[transcription_output, detected_language_output, translation_output, summary_output],
-        # Explicitly naming the API endpoint to fix the "No API found" error
-        api_name="process_audio"
+        api_name="process_audio" 
     )
 
 app = gr.mount_gradio_app(app, interface, path="/")
