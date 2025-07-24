@@ -213,12 +213,21 @@ def main():
     st.title("🎵 Concisio App")
     st.markdown("Upload an audio file to transcribe, diarize, and optionally translate or summarize.")
     
-    # Load predictor and OpenAI client
-    predictor = load_predictor()
-    openai_client = get_openai_client()
+    # Load predictor and OpenAI client with error handling
+    try:
+        predictor = load_predictor()
+        openai_client = get_openai_client()
+    except Exception as e:
+        st.error(f"⚠️ Error loading models: {str(e)}")
+        st.info("This might be a GPU memory issue. Try refreshing the page or contact support.")
+        return
     
     if predictor is None:
         st.error("⚠️ Predictor not initialized. Please check the logs for initialization errors.")
+        st.info("**Troubleshooting tips:**")
+        st.info("- Make sure your Space has sufficient GPU memory")
+        st.info("- Try refreshing the page")
+        st.info("- Check if all required environment variables are set")
         return
     
     # Sidebar for inputs
