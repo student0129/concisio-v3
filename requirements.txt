@@ -1,4 +1,13 @@
-# Streamlit for web UI
+# Web UI
+streamlit
+
+# Core ML libraries (these will pull in their dependencies automatically)
+whisperx
+pyannote.audio
+
+# Other dependencies
+openai
+python-dotenv# Streamlit for web UI
 streamlit
 
 # PyTorch with CUDA support - install first
