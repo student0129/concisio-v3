@@ -1,10 +1,10 @@
 ---
 title: Concisio App
-emoji: 🎤
-colorFrom: indigo
+emoji: 🎵
+colorFrom: blue
 colorTo: purple
-sdk: gradio
-sdk_version: "4.29.0"
+sdk: streamlit
+sdk_version: 1.28.1
 app_file: app.py
 pinned: false
 ---
