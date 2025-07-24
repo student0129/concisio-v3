@@ -1,16 +1,16 @@
-# FastAPI and Gradio for web server and UI
+# Test with ONLY Gradio to isolate the issue
 gradio==3.35.0
 
-# Core ML and transcription libraries
-torch
-torchaudio
-whisperx
-pyannote.audio==3.1.1
-
-# Other dependencies
-pydub
-ffmpeg-python
-openai
+# Basic dependencies only
 python-dotenv
 pandas
 numpy
+
+# Comment out ML libraries temporarily to test
+# torch
+# torchaudio
+# whisperx
+# pyannote.audio==3.1.1
+# pydub
+# ffmpeg-python
+# openai
