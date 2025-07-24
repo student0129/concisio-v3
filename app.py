@@ -7,14 +7,14 @@ from predict import Predictor
 # Load environment variables from .env file
 load_dotenv()
 
-# (4) New default summarization prompt
+# Default summarization prompt
 DEFAULT_SUMMARY_PROMPT = """Please provide a structured summary of the conversation with the following sections:
 - **Background:** Briefly describe the context of the discussion.
 - **Key Discussion Points:** List the main topics and what was said by each speaker.
 - **Decisions Made:** Detail any decisions that were reached.
 - **Next Steps:** Outline the action items, who is responsible, and the deadlines."""
 
-# (1) Dictionary of languages for the dropdown, with full names.
+# Dictionary of languages for the dropdown, with full names.
 LANGUAGES = {
     "No Translation": "None",
     "English": "en",
@@ -67,7 +67,6 @@ def process_audio(audio_file, target_language, custom_prompt):
 
 # Create the Gradio Interface
 with gr.Blocks(theme=gr.themes.Soft()) as interface:
-    # (3) Changed the name of the app
     gr.Markdown("# Concisio App")
     gr.Markdown("Upload an audio file to transcribe, diarize, and optionally translate or summarize.")
 
@@ -76,17 +75,15 @@ with gr.Blocks(theme=gr.themes.Soft()) as interface:
             audio_input = gr.Audio(type="filepath", label="Upload Audio File")
             
             gr.Markdown("### Options")
-            # (1) Updated language dropdown
             language_dropdown = gr.Dropdown(
                 choices=list(LANGUAGES.keys()), 
                 value="No Translation",
                 label="Translate to (Optional)",
             )
-            # (4) Updated summary prompt textbox
             summary_prompt_input = gr.Textbox(
                 label="Summarization Prompt (Leave blank to skip)",
                 value=DEFAULT_SUMMARY_PROMPT,
-                lines=8, # Increased lines to show the full default prompt
+                lines=8,
             )
             submit_button = gr.Button("Process Audio", variant="primary")
 
@@ -97,12 +94,19 @@ with gr.Blocks(theme=gr.themes.Soft()) as interface:
             translation_output = gr.Textbox(label="Translation", lines=5, interactive=False)
             summary_output = gr.Textbox(label="Summary", lines=5, interactive=False)
     
-    def get_lang_code(lang_name):
-        return LANGUAGES.get(lang_name, "None")
+    # --- API ERROR FIX ---
+    # Using a dedicated wrapper function instead of a lambda to ensure Gradio's
+    # API generator can correctly parse the function and its inputs.
+    def gradio_wrapper(audio, lang_name, prompt):
+        """
+        A wrapper function to handle the inputs from the Gradio interface
+        and pass them to the main processing function.
+        """
+        lang_code = LANGUAGES.get(lang_name, "None")
+        return process_audio(audio, lang_code, prompt)
 
-    # (2) Added api_name to fix the "No API found" error
     submit_button.click(
-        fn=lambda audio, lang_name, prompt: process_audio(audio, get_lang_code(lang_name), prompt),
+        fn=gradio_wrapper, # Use the named wrapper function
         inputs=[audio_input, language_dropdown, summary_prompt_input],
         outputs=[transcription_output, detected_language_output, translation_output, summary_output],
         api_name="process_audio" 
