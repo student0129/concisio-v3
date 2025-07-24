@@ -1,5 +1,6 @@
 # FastAPI and Gradio for web server and UI
 gradio==4.29.0
+pydantic>=2.0.0,<3.0.0
 
 # Core ML and transcription libraries
 torch
