@@ -213,12 +213,21 @@ def main():
     st.title("🎵 Concisio App")
     st.markdown("Upload an audio file to transcribe, diarize, and optionally translate or summarize.")
     
-    # Load predictor and OpenAI client
-    predictor = load_predictor()
-    openai_client = get_openai_client()
+    # Load predictor and OpenAI client with error handling
+    try:
+        predictor = load_predictor()
+        openai_client = get_openai_client()
+    except Exception as e:
+        st.error(f"⚠️ Error loading models: {str(e)}")
+        st.info("This might be a GPU memory issue. Try refreshing the page or contact support.")
+        return
     
     if predictor is None:
         st.error("⚠️ Predictor not initialized. Please check the logs for initialization errors.")
+        st.info("**Troubleshooting tips:**")
+        st.info("- Make sure your Space has sufficient GPU memory")
+        st.info("- Try refreshing the page")
+        st.info("- Check if all required environment variables are set")
         return
     
     # Sidebar for inputs
@@ -381,7 +390,16 @@ def main():
     
     # Process audio when button is clicked
     if process_button and audio_file is not None:
-        with st.spinner(f"Processing audio... This may take up to {estimate_processing_time(file_size_mb, include_diarization)} minutes."):
+        # Get diarization mode setting
+        fast_mode = include_diarization and diarization_mode == "Fast (Less Accurate)"
+        estimated_time = estimate_processing_time(
+            len(audio_file.getbuffer()) / (1024 * 1024), 
+            include_diarization, 
+            gpu_available, 
+            fast_mode
+        )
+        
+        with st.spinner(f"Processing audio... This may take up to {estimated_time} minutes."):
             # Show progress info
             progress_container = st.container()
             with progress_container:
@@ -392,7 +410,6 @@ def main():
                 progress_bar.progress(10)
                 
                 language_code = LANGUAGES.get(target_language, "None")
-                fast_mode = include_diarization and 'diarization_mode' in locals() and diarization_mode == "Fast (Less Accurate)"
                 
                 status_text.text("🎤 Starting transcription...")
                 progress_bar.progress(30)
