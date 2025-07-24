@@ -1,18 +1,22 @@
-# FastAPI and Gradio for web server and UI
-# fastapi
-gradio==4.29.0
+# Core UI
+gradio==4.19.2
 
 # ML/Audio libraries
 torch==2.1.0
 torchaudio==2.1.0
+numpy==1.24.3
 whisperx
 pyannote.audio==3.1.1
 
-# Other dependencies
-# uvicorn[standard]
+# Audio processing
 pydub
 ffmpeg-python
+
+# API and utilities
 openai
 python-dotenv
-pandas
-numpy
+pandas==2.0.3
+
+# Commented for HF Spaces
+# fastapi
+# uvicorn[standard]
