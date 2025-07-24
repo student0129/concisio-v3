@@ -106,5 +106,4 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
 
 # For Hugging Face Spaces, you might want to use just Gradio without FastAPI
 if __name__ == "__main__":
-    # Launching Gradio directly is more stable for Hugging Face Spaces
-    demo.launch(server_name="0.0.0.0", server_port=7860)
+    demo.launch()
