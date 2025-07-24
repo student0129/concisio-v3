@@ -1,10 +1,23 @@
 import os
 import gradio as gr
 from dotenv import load_dotenv
-from predict import Predictor 
 
 # Load environment variables from .env file
 load_dotenv()
+
+# Add debugging
+print("Starting Concisio App...")
+print(f"Environment variables loaded: HF_TOKEN={'HF_TOKEN' in os.environ}, OPENAI_API_KEY={'OPENAI_API_KEY' in os.environ}")
+
+try:
+    from predict import Predictor
+    predictor = Predictor()
+    print("Predictor initialized successfully")
+except Exception as e:
+    print(f"Error initializing Predictor: {e}")
+    predictor = None
+    # You might want to show an error in the UI
+    raise
 
 # Default summarization prompt
 DEFAULT_SUMMARY_PROMPT = """Please provide a structured summary of the conversation with the following sections:
@@ -38,27 +51,70 @@ def process_audio_file(audio_file, target_language, custom_prompt):
     """
     Process the uploaded audio file for transcription, translation, and summarization.
     """
+    # Debug: Initial state
+    print(f"\n{'='*50}")
+    print(f"Processing started at: {datetime.now()}")
+    print(f"Audio file: {audio_file}")
+    print(f"Target language: {target_language}")
+    print(f"Custom prompt provided: {bool(custom_prompt and custom_prompt.strip())}")
+    
     if audio_file is None:
+        print("ERROR: No audio file provided")
         return "Please upload an audio file first.", "", "", ""
-
-    result = predictor.predict(
-        audio_file_path=audio_file,
-        target_language=target_language,
-        custom_summary_prompt=custom_prompt
-    )
-
-    if "error" in result:
-        error_message = f"An error occurred: {result['error']}"
-        return error_message, "", "", ""
-
-    segments_formatted = "\n".join(
-        [f"[{s['start']:.2f}-{s['end']:.2f}] {s['speaker']}: {s['text'].strip()}" for s in result.get("segments", [])]
-    )
-    language_detected = result.get("language_detected", "N/A")
-    translation = result.get("translation", "Not requested or an error occurred.")
-    summary = result.get("summary", "Not requested or an error occurred.")
-
-    return segments_formatted, language_detected, translation, summary
+    
+    # Debug: File info
+    if os.path.exists(audio_file):
+        file_size = os.path.getsize(audio_file) / (1024 * 1024)  # Size in MB
+        print(f"File size: {file_size:.2f} MB")
+        print(f"File type: {os.path.splitext(audio_file)[1]}")
+    
+    try:
+        print("\nCalling predictor.predict()...")
+        
+        result = predictor.predict(
+            audio_file_path=audio_file,
+            target_language=target_language,
+            custom_summary_prompt=custom_prompt
+        )
+        
+        print(f"Predictor returned successfully")
+        print(f"Result keys: {list(result.keys())}")
+        
+        if "error" in result:
+            error_message = f"An error occurred: {result['error']}"
+            print(f"ERROR in result: {result['error']}")
+            return error_message, "", "", ""
+        
+        # Debug: Process results
+        segments = result.get("segments", [])
+        print(f"\nNumber of segments: {len(segments)}")
+        if segments:
+            print(f"First segment: {segments[0]}")
+            
+        segments_formatted = "\n".join(
+            [f"[{s['start']:.2f}-{s['end']:.2f}] {s['speaker']}: {s['text'].strip()}" 
+             for s in segments]
+        )
+        
+        language_detected = result.get("language_detected", "N/A")
+        print(f"Language detected: {language_detected}")
+        
+        translation = result.get("translation", "Not requested or an error occurred.")
+        summary = result.get("summary", "Not requested or an error occurred.")
+        
+        print(f"Translation provided: {bool(translation and translation != 'Not requested or an error occurred.')}")
+        print(f"Summary provided: {bool(summary and summary != 'Not requested or an error occurred.')}")
+        
+        print(f"Processing completed at: {datetime.now()}")
+        print(f"{'='*50}\n")
+        
+        return segments_formatted, language_detected, translation, summary
+        
+    except Exception as e:
+        print(f"\nEXCEPTION in process_audio_file: {type(e).__name__}: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return f"Error: {str(e)}", "", "", ""
 
 def gradio_interface(audio, language_name, prompt):
     """
@@ -106,5 +162,4 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
 
 # For Hugging Face Spaces, you might want to use just Gradio without FastAPI
 if __name__ == "__main__":
-    # Launching Gradio directly is more stable for Hugging Face Spaces
-    demo.launch(server_name="0.0.0.0", server_port=7860)
+    demo.launch()
