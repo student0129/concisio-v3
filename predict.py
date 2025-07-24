@@ -5,6 +5,8 @@ import warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="pyannote")
 warnings.filterwarnings("ignore", category=UserWarning, module="speechbrain")
 warnings.filterwarnings("ignore", category=UserWarning, module="torchaudio")
+warnings.filterwarnings("ignore", message=".*audio is shorter than 30s.*")
+warnings.filterwarnings("ignore", message=".*language detection may be inaccurate.*")
 
 # Import torch and related libraries
 try:
@@ -167,10 +169,29 @@ class Predictor:
             if self.device == "cuda":
                 torch.cuda.empty_cache()
             
-            self.diarize_model = whisperx.DiarizationPipeline(
-                use_auth_token=hf_token, 
-                device=self.device
-            )
+            # Try different import methods for WhisperX diarization
+            try:
+                # Method 1: Direct import (newer versions)
+                from whisperx.diarize import DiarizationPipeline
+                self.diarize_model = DiarizationPipeline(
+                    use_auth_token=hf_token, 
+                    device=self.device
+                )
+            except (ImportError, AttributeError):
+                # Method 2: Module-level access (older versions)
+                try:
+                    self.diarize_model = whisperx.diarize.DiarizationPipeline(
+                        use_auth_token=hf_token, 
+                        device=self.device
+                    )
+                except AttributeError:
+                    # Method 3: Alternative import path
+                    import whisperx.diarize
+                    self.diarize_model = whisperx.diarize.DiarizationPipeline(
+                        use_auth_token=hf_token, 
+                        device=self.device
+                    )
+            
             print("✅ Diarization model loaded successfully")
             
         except Exception as e:
