@@ -1,5 +1,5 @@
 ---
-title: WhisperX GPT App
+title: Concisio App
 emoji: 🎤
 colorFrom: indigo
 colorTo: purple
