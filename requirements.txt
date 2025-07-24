@@ -1,21 +1,20 @@
-# Core UI
-gradio==4.19.2
+# Install torch FIRST with specific version
+torch==2.0.0
+torchaudio==2.0.0
 
-# ML/Audio libraries
-torch==2.1.0
-torchaudio==2.1.0
-numpy==1.24.3
+# Then install WhisperX from PyPI
 whisperx
+
+# Pin pyannote.audio to avoid conflicts
 pyannote.audio==3.1.1
 
-# Audio processing
+# Other dependencies
+numpy<2.0  # Prevent numpy 2.x
 pydub
 ffmpeg-python
-
-# API and utilities
 openai
 python-dotenv
-pandas==2.0.3
+pandas
 
 # Commented for HF Spaces
 # fastapi
