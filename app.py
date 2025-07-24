@@ -390,7 +390,16 @@ def main():
     
     # Process audio when button is clicked
     if process_button and audio_file is not None:
-        with st.spinner(f"Processing audio... This may take up to {estimate_processing_time(file_size_mb, include_diarization)} minutes."):
+        # Get diarization mode setting
+        fast_mode = include_diarization and diarization_mode == "Fast (Less Accurate)"
+        estimated_time = estimate_processing_time(
+            len(audio_file.getbuffer()) / (1024 * 1024), 
+            include_diarization, 
+            gpu_available, 
+            fast_mode
+        )
+        
+        with st.spinner(f"Processing audio... This may take up to {estimated_time} minutes."):
             # Show progress info
             progress_container = st.container()
             with progress_container:
@@ -401,7 +410,6 @@ def main():
                 progress_bar.progress(10)
                 
                 language_code = LANGUAGES.get(target_language, "None")
-                fast_mode = include_diarization and 'diarization_mode' in locals() and diarization_mode == "Fast (Less Accurate)"
                 
                 status_text.text("🎤 Starting transcription...")
                 progress_bar.progress(30)
