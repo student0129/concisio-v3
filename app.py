@@ -196,7 +196,7 @@ def estimate_processing_time(file_size_mb, include_diarization=True, gpu_availab
     
     return max(1, int(base_time))
 
-def process_audio_file(audio_file, target_language, custom_prompt, predictor, include_diarization=True, fast_diarization=False):
+def process_audio_file(audio_file, target_language, custom_prompt, predictor, include_diarization=True, fast_diarization=False, progress_callback=None):
     """
     Process the uploaded audio file for transcription, translation, and summarization.
     """
