@@ -4,6 +4,10 @@ import os
 
 # Install and configure cuDNN libraries
 def setup_cudnn():
+    # Check if already configured
+    if os.environ.get('CUDNN_SETUP_COMPLETE'):
+        return
+        
     try:
         # Try to find where cudnn is installed
         import site
@@ -20,46 +24,71 @@ def setup_cudnn():
         # Add all existing nvidia library paths
         ld_paths = []
         for path in nvidia_paths:
-            if os.path.exists(path):
+            if os.path.exists(path) and path not in ld_paths:
                 ld_paths.append(path)
                 print(f"Found NVIDIA library path: {path}")
         
+        # Also check standard CUDA paths
+        standard_paths = ['/usr/local/cuda/lib64', '/usr/lib/x86_64-linux-gnu']
+        for path in standard_paths:
+            if os.path.exists(path) and path not in ld_paths:
+                ld_paths.append(path)
+                print(f"Found standard CUDA path: {path}")
+        
         if ld_paths:
             current_ld = os.environ.get('LD_LIBRARY_PATH', '')
-            new_ld = ':'.join(ld_paths) + (':' + current_ld if current_ld else '')
-            os.environ['LD_LIBRARY_PATH'] = new_ld
-            print(f"Updated LD_LIBRARY_PATH: {new_ld}")
+            # Only add paths that aren't already in LD_LIBRARY_PATH
+            current_paths = current_ld.split(':') if current_ld else []
+            new_paths = [p for p in ld_paths if p not in current_paths]
+            
+            if new_paths:
+                new_ld = ':'.join(new_paths + current_paths) if current_paths else ':'.join(new_paths)
+                os.environ['LD_LIBRARY_PATH'] = new_ld
+                print(f"Updated LD_LIBRARY_PATH")
+            
+        # Mark as complete
+        os.environ['CUDNN_SETUP_COMPLETE'] = '1'
             
     except Exception as e:
         print(f"Error setting up cuDNN: {e}")
 
-# Run setup before any torch imports
-setup_cudnn()
+# Only run setup once
+if not os.environ.get('CUDNN_SETUP_COMPLETE'):
+    # Your existing setup_cudnn function here
+    setup_cudnn()
 
-# Run setup before any torch imports
-setup_cudnn()
+# Disable JIT only once
+if not os.environ.get('PYTORCH_JIT_DISABLED'):
+    os.environ['PYTORCH_JIT'] = '0'
+    os.environ['PYTORCH_JIT_DISABLED'] = '1'
 
 # Debug: Check what paths were found
 print("Checking for CUDA libraries...")
 print(f"LD_LIBRARY_PATH: {os.environ.get('LD_LIBRARY_PATH', 'Not set')}")
 
-# Also check standard CUDA paths
-standard_cuda_paths = ['/usr/local/cuda/lib64', '/usr/lib/x86_64-linux-gnu']
-for path in standard_cuda_paths:
-    if os.path.exists(path):
-        print(f"Found standard CUDA path: {path}")
-        # Add to LD_LIBRARY_PATH if not already there
-        current_ld = os.environ.get('LD_LIBRARY_PATH', '')
-        if path not in current_ld:
-            os.environ['LD_LIBRARY_PATH'] = f"{path}:{current_ld}" if current_ld else path
-            
-# Disable JIT
-os.environ['PYTORCH_JIT'] = '0'
+def verify_cuda_setup():
+    """Verify CUDA is properly set up"""
+    try:
+        import torch
+        print("="*50)
+        print("CUDA Setup Verification:")
+        print(f"PyTorch version: {torch.__version__}")
+        print(f"CUDA available: {torch.cuda.is_available()}")
+        if torch.cuda.is_available():
+            print(f"CUDA version: {torch.version.cuda}")
+            print(f"cuDNN version: {torch.backends.cudnn.version()}")
+            print(f"cuDNN enabled: {torch.backends.cudnn.enabled}")
+        print("="*50)
+    except Exception as e:
+        print(f"Error verifying CUDA setup: {e}")
 
 import streamlit as st
 from dotenv import load_dotenv
 from datetime import datetime
 import openai
+
+# Call it right after imports
+verify_cuda_setup()
 
 # Load environment variables from .env file
 load_dotenv()
@@ -206,7 +235,8 @@ def process_audio_file(audio_file, target_language, custom_prompt, predictor, in
             target_language=target_language,
             custom_summary_prompt=custom_prompt,
             include_diarization=include_diarization,
-            fast_diarization=fast_diarization
+            fast_diarization=fast_diarization,
+            progress_callback=progress_callback
         )
         
         print(f"Predictor returned successfully")
@@ -462,6 +492,11 @@ def main():
             with progress_container:
                 progress_bar = st.progress(0)
                 status_text = st.empty()
+
+                # Create a progress callback function
+                def update_progress(step, progress_pct):
+                    status_text.text(step)
+                    progress_bar.progress(progress_pct)
                 
                 status_text.text("🎵 Loading audio file...")
                 progress_bar.progress(10)
@@ -483,7 +518,8 @@ def main():
                 
                 # Process the audio
                 transcription, language_detected, translation, summary = process_audio_file(
-                    audio_file, language_code, custom_prompt, predictor, include_diarization, fast_mode
+                    audio_file, language_code, custom_prompt, predictor, include_diarization, fast_mode,
+                    progress_callback=update_progress
                 )
                 
                 progress_bar.progress(100)

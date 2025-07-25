@@ -1,37 +1,6 @@
 import os
 import sys
 
-# Fix CUDA library paths before importing torch
-def setup_cuda_libs():
-    """Setup CUDA library paths for Hugging Face Spaces"""
-    # Try to find NVIDIA libraries in site-packages
-    try:
-        import site
-        site_packages = site.getsitepackages()[0]
-        nvidia_paths = [
-            os.path.join(site_packages, 'nvidia', 'cudnn', 'lib'),
-            os.path.join(site_packages, 'nvidia', 'cudnn', 'lib64'),
-            os.path.join(site_packages, 'nvidia', 'cublas', 'lib'),
-            os.path.join(site_packages, 'nvidia', 'cuda_runtime', 'lib'),
-        ]
-        
-        valid_paths = [p for p in nvidia_paths if os.path.exists(p)]
-        
-        # Also check standard CUDA paths
-        standard_paths = ['/usr/local/cuda/lib64', '/usr/lib/x86_64-linux-gnu']
-        valid_paths.extend([p for p in standard_paths if os.path.exists(p)])
-        
-        if valid_paths:
-            current_ld = os.environ.get('LD_LIBRARY_PATH', '')
-            new_ld = ':'.join(valid_paths) + (':' + current_ld if current_ld else '')
-            os.environ['LD_LIBRARY_PATH'] = new_ld
-            print(f"[Predictor Setup] Updated LD_LIBRARY_PATH with: {valid_paths}")
-    except Exception as e:
-        print(f"[Predictor Setup] Warning: Could not setup CUDA paths: {e}")
-
-# Setup CUDA before any imports
-setup_cuda_libs()
-
 # Disable JIT to avoid torch.classes error
 os.environ['PYTORCH_JIT'] = '0'
 
@@ -44,7 +13,6 @@ warnings.filterwarnings("ignore", category=UserWarning, module="torchaudio")
 warnings.filterwarnings("ignore", message=".*audio is shorter than 30s.*")
 warnings.filterwarnings("ignore", message=".*language detection may be inaccurate.*")
 
-# Import torch and related libraries
 # Import torch and related libraries
 try:
     import torch
@@ -137,17 +105,6 @@ class Predictor:
     def _load_whisper_model(self):
         """Load Whisper model with progressive fallback"""
         print("Loading Whisper model...")
-
-        # Check if cuDNN is available when using CUDA
-        if self.device == "cuda":
-            try:
-                import torch
-                if not torch.backends.cudnn.enabled:
-                    print("⚠️ cuDNN not available, falling back to CPU")
-                    self.device = "cpu"
-                    self.compute_type = "int8"
-            except Exception as e:
-                print(f"⚠️ Could not check cuDNN: {e}")
 
         # Model size options in order of preference
         if self.device == "cuda":
@@ -272,7 +229,8 @@ class Predictor:
         target_language: str = "None", 
         custom_summary_prompt: Optional[str] = None,
         include_diarization: bool = True,
-        fast_diarization: bool = False
+        fast_diarization: bool = False,
+        progress_callback = None
     ) -> Dict[str, Any]:
         """
         Runs the full prediction pipeline.
@@ -290,17 +248,23 @@ class Predictor:
         try:
             # Convert to WAV
             print("[Predict] Converting to WAV...")
+            if progress_callback:
+                progress_callback("🎵 Converting audio to WAV format...", 5)
             wav_path = convert_to_wav(audio_file_path)
             print(f"[Predict] WAV path: {wav_path}")
             
             # Load and process audio
             print("[Predict] Loading audio...")
+            if progress_callback:
+                progress_callback("📁 Loading audio file...", 10)
             audio = whisperx.load_audio(wav_path)
             duration = len(audio) / 16000
             print(f"[Predict] Audio loaded, duration: {duration:.1f} seconds")
 
             # Transcribe
             print("[Predict] Starting transcription...")
+            if progress_callback:
+                progress_callback("🎤 Transcribing audio (this may take a while)...", 20)
             batch_size = 32 if self.device == "cuda" else 8
             
             result = self.model.transcribe(audio, batch_size=batch_size)
@@ -310,6 +274,8 @@ class Predictor:
 
             # Align
             print("[Predict] Aligning transcription...")
+            if progress_callback:
+                progress_callback("🔄 Aligning transcription with audio...", 40)
             try:
                 model_a, metadata = whisperx.load_align_model(
                     language_code=result["language"], 
@@ -328,6 +294,8 @@ class Predictor:
                 print(f"[Predict] Alignment failed: {e}, continuing with unaligned segments...")
 
             # Process segments with diarization
+            if include_diarization and progress_callback:
+                progress_callback("🎭 Processing speaker diarization...", 60)
             final_segments = self._process_diarization(
                 audio, result["segments"], include_diarization, fast_diarization
             )
@@ -338,9 +306,21 @@ class Predictor:
             print(f"[Predict] Generated full text ({len(full_text)} characters)")
 
             # Translation and summarization
+            if target_language != "None" and output_data["language_detected"] != target_language:
+                if progress_callback:
+                    progress_callback(f"🌍 Translating to {target_language}...", 75)
+
+            # Summarization
+            if custom_summary_prompt and custom_summary_prompt.strip():
+                if progress_callback:
+                    progress_callback("📋 Generating summary...", 85)
+                
             self._process_translation_and_summary(
                 output_data, full_text, target_language, custom_summary_prompt
             )
+
+            if progress_callback:
+                progress_callback("✅ Processing complete!", 100)
 
             print("[Predict] Pipeline completed successfully")
             return output_data
