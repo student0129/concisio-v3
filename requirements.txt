@@ -1,7 +1,6 @@
 streamlit
 torch
 torchaudio
---extra-index-url https://download.pytorch.org/whl/cu118
 whisperx
 pyannote.audio
 openai
