@@ -235,7 +235,8 @@ def process_audio_file(audio_file, target_language, custom_prompt, predictor, in
             target_language=target_language,
             custom_summary_prompt=custom_prompt,
             include_diarization=include_diarization,
-            fast_diarization=fast_diarization
+            fast_diarization=fast_diarization,
+            progress_callback=progress_callback
         )
         
         print(f"Predictor returned successfully")
@@ -491,6 +492,11 @@ def main():
             with progress_container:
                 progress_bar = st.progress(0)
                 status_text = st.empty()
+
+                # Create a progress callback function
+                def update_progress(step, progress_pct):
+                    status_text.text(step)
+                    progress_bar.progress(progress_pct)
                 
                 status_text.text("🎵 Loading audio file...")
                 progress_bar.progress(10)
@@ -512,7 +518,8 @@ def main():
                 
                 # Process the audio
                 transcription, language_detected, translation, summary = process_audio_file(
-                    audio_file, language_code, custom_prompt, predictor, include_diarization, fast_mode
+                    audio_file, language_code, custom_prompt, predictor, include_diarization, fast_mode,
+                    progress_callback=update_progress
                 )
                 
                 progress_bar.progress(100)
