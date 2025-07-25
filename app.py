@@ -1,5 +1,62 @@
-import streamlit as st
+import subprocess
+import sys
 import os
+
+# Install and configure cuDNN libraries
+def setup_cudnn():
+    try:
+        # Try to find where cudnn is installed
+        import site
+        site_packages = site.getsitepackages()[0]
+        
+        # Common paths where nvidia packages install libraries
+        nvidia_paths = [
+            os.path.join(site_packages, 'nvidia', 'cudnn', 'lib'),
+            os.path.join(site_packages, 'nvidia', 'cudnn', 'lib64'),
+            os.path.join(site_packages, 'nvidia', 'cublas', 'lib'),
+            os.path.join(site_packages, 'nvidia', 'cuda_runtime', 'lib'),
+        ]
+        
+        # Add all existing nvidia library paths
+        ld_paths = []
+        for path in nvidia_paths:
+            if os.path.exists(path):
+                ld_paths.append(path)
+                print(f"Found NVIDIA library path: {path}")
+        
+        if ld_paths:
+            current_ld = os.environ.get('LD_LIBRARY_PATH', '')
+            new_ld = ':'.join(ld_paths) + (':' + current_ld if current_ld else '')
+            os.environ['LD_LIBRARY_PATH'] = new_ld
+            print(f"Updated LD_LIBRARY_PATH: {new_ld}")
+            
+    except Exception as e:
+        print(f"Error setting up cuDNN: {e}")
+
+# Run setup before any torch imports
+setup_cudnn()
+
+# Run setup before any torch imports
+setup_cudnn()
+
+# Debug: Check what paths were found
+print("Checking for CUDA libraries...")
+print(f"LD_LIBRARY_PATH: {os.environ.get('LD_LIBRARY_PATH', 'Not set')}")
+
+# Also check standard CUDA paths
+standard_cuda_paths = ['/usr/local/cuda/lib64', '/usr/lib/x86_64-linux-gnu']
+for path in standard_cuda_paths:
+    if os.path.exists(path):
+        print(f"Found standard CUDA path: {path}")
+        # Add to LD_LIBRARY_PATH if not already there
+        current_ld = os.environ.get('LD_LIBRARY_PATH', '')
+        if path not in current_ld:
+            os.environ['LD_LIBRARY_PATH'] = f"{path}:{current_ld}" if current_ld else path
+            
+# Disable JIT
+os.environ['PYTORCH_JIT'] = '0'
+
+import streamlit as st
 from dotenv import load_dotenv
 from datetime import datetime
 import openai
