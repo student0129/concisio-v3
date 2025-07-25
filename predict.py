@@ -1,4 +1,40 @@
 import os
+import sys
+
+# Fix CUDA library paths before importing torch
+def setup_cuda_libs():
+    """Setup CUDA library paths for Hugging Face Spaces"""
+    # Try to find NVIDIA libraries in site-packages
+    try:
+        import site
+        site_packages = site.getsitepackages()[0]
+        nvidia_paths = [
+            os.path.join(site_packages, 'nvidia', 'cudnn', 'lib'),
+            os.path.join(site_packages, 'nvidia', 'cudnn', 'lib64'),
+            os.path.join(site_packages, 'nvidia', 'cublas', 'lib'),
+            os.path.join(site_packages, 'nvidia', 'cuda_runtime', 'lib'),
+        ]
+        
+        valid_paths = [p for p in nvidia_paths if os.path.exists(p)]
+        
+        # Also check standard CUDA paths
+        standard_paths = ['/usr/local/cuda/lib64', '/usr/lib/x86_64-linux-gnu']
+        valid_paths.extend([p for p in standard_paths if os.path.exists(p)])
+        
+        if valid_paths:
+            current_ld = os.environ.get('LD_LIBRARY_PATH', '')
+            new_ld = ':'.join(valid_paths) + (':' + current_ld if current_ld else '')
+            os.environ['LD_LIBRARY_PATH'] = new_ld
+            print(f"[Predictor Setup] Updated LD_LIBRARY_PATH with: {valid_paths}")
+    except Exception as e:
+        print(f"[Predictor Setup] Warning: Could not setup CUDA paths: {e}")
+
+# Setup CUDA before any imports
+setup_cuda_libs()
+
+# Disable JIT to avoid torch.classes error
+os.environ['PYTORCH_JIT'] = '0'
+
 import warnings
 
 # Suppress known warnings first
@@ -9,12 +45,16 @@ warnings.filterwarnings("ignore", message=".*audio is shorter than 30s.*")
 warnings.filterwarnings("ignore", message=".*language detection may be inaccurate.*")
 
 # Import torch and related libraries
+# Import torch and related libraries
 try:
     import torch
     print(f"Torch imported successfully. Version: {torch.__version__}")
     print(f"CUDA available: {torch.cuda.is_available()}")
     if torch.cuda.is_available():
         print(f"CUDA device: {torch.cuda.get_device_name(0)}")
+        print(f"CUDA version: {torch.version.cuda}")
+        print(f"cuDNN version: {torch.backends.cudnn.version()}")
+        print(f"cuDNN enabled: {torch.backends.cudnn.enabled}")
 except ImportError as e:
     print(f"Error importing torch: {e}")
     raise e
@@ -97,7 +137,18 @@ class Predictor:
     def _load_whisper_model(self):
         """Load Whisper model with progressive fallback"""
         print("Loading Whisper model...")
-        
+
+        # Check if cuDNN is available when using CUDA
+        if self.device == "cuda":
+            try:
+                import torch
+                if not torch.backends.cudnn.enabled:
+                    print("⚠️ cuDNN not available, falling back to CPU")
+                    self.device = "cpu"
+                    self.compute_type = "int8"
+            except Exception as e:
+                print(f"⚠️ Could not check cuDNN: {e}")
+
         # Model size options in order of preference
         if self.device == "cuda":
             model_options = [
