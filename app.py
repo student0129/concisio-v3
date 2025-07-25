@@ -87,9 +87,6 @@ from dotenv import load_dotenv
 from datetime import datetime
 import openai
 
-# Call it right after imports
-verify_cuda_setup()
-
 # Load environment variables from .env file
 load_dotenv()
 
@@ -296,6 +293,12 @@ def main():
         page_icon="🎵",
         layout="wide"
     )
+
+    # Use session_state to run this block only once
+    if 'initialized' not in st.session_state:
+        print("--- Running one-time initialization ---")
+        verify_cuda_setup()
+        st.session_state['initialized'] = True
     
     st.title("🎵 Concisio App")
     st.markdown("Upload an audio file to transcribe, diarize, and optionally translate or summarize.")
