@@ -45,7 +45,6 @@ warnings.filterwarnings("ignore", message=".*audio is shorter than 30s.*")
 warnings.filterwarnings("ignore", message=".*language detection may be inaccurate.*")
 
 # Import torch and related libraries
-# Import torch and related libraries
 try:
     import torch
     print(f"Torch imported successfully. Version: {torch.__version__}")
