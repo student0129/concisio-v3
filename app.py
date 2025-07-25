@@ -36,9 +36,6 @@ def setup_cudnn():
 # Run setup before any torch imports
 setup_cudnn()
 
-# Run setup before any torch imports
-setup_cudnn()
-
 # Debug: Check what paths were found
 print("Checking for CUDA libraries...")
 print(f"LD_LIBRARY_PATH: {os.environ.get('LD_LIBRARY_PATH', 'Not set')}")
@@ -56,10 +53,29 @@ for path in standard_cuda_paths:
 # Disable JIT
 os.environ['PYTORCH_JIT'] = '0'
 
+def verify_cuda_setup():
+    """Verify CUDA is properly set up"""
+    try:
+        import torch
+        print("="*50)
+        print("CUDA Setup Verification:")
+        print(f"PyTorch version: {torch.__version__}")
+        print(f"CUDA available: {torch.cuda.is_available()}")
+        if torch.cuda.is_available():
+            print(f"CUDA version: {torch.version.cuda}")
+            print(f"cuDNN version: {torch.backends.cudnn.version()}")
+            print(f"cuDNN enabled: {torch.backends.cudnn.enabled}")
+        print("="*50)
+    except Exception as e:
+        print(f"Error verifying CUDA setup: {e}")
+
 import streamlit as st
 from dotenv import load_dotenv
 from datetime import datetime
 import openai
+
+# Call it right after imports
+verify_cuda_setup()
 
 # Load environment variables from .env file
 load_dotenv()
