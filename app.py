@@ -66,19 +66,6 @@ if not os.environ.get('PYTORCH_JIT_DISABLED'):
 print("Checking for CUDA libraries...")
 print(f"LD_LIBRARY_PATH: {os.environ.get('LD_LIBRARY_PATH', 'Not set')}")
 
-# Also check standard CUDA paths
-standard_cuda_paths = ['/usr/local/cuda/lib64', '/usr/lib/x86_64-linux-gnu']
-for path in standard_cuda_paths:
-    if os.path.exists(path):
-        print(f"Found standard CUDA path: {path}")
-        # Add to LD_LIBRARY_PATH if not already there
-        current_ld = os.environ.get('LD_LIBRARY_PATH', '')
-        if path not in current_ld:
-            os.environ['LD_LIBRARY_PATH'] = f"{path}:{current_ld}" if current_ld else path
-            
-# Disable JIT
-os.environ['PYTORCH_JIT'] = '0'
-
 def verify_cuda_setup():
     """Verify CUDA is properly set up"""
     try:
