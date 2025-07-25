@@ -229,7 +229,8 @@ class Predictor:
         target_language: str = "None", 
         custom_summary_prompt: Optional[str] = None,
         include_diarization: bool = True,
-        fast_diarization: bool = False
+        fast_diarization: bool = False,
+        progress_callback = None
     ) -> Dict[str, Any]:
         """
         Runs the full prediction pipeline.
@@ -247,17 +248,23 @@ class Predictor:
         try:
             # Convert to WAV
             print("[Predict] Converting to WAV...")
+            if progress_callback:
+                progress_callback("🎵 Converting audio to WAV format...", 5)
             wav_path = convert_to_wav(audio_file_path)
             print(f"[Predict] WAV path: {wav_path}")
             
             # Load and process audio
             print("[Predict] Loading audio...")
+            if progress_callback:
+                progress_callback("📁 Loading audio file...", 10)
             audio = whisperx.load_audio(wav_path)
             duration = len(audio) / 16000
             print(f"[Predict] Audio loaded, duration: {duration:.1f} seconds")
 
             # Transcribe
             print("[Predict] Starting transcription...")
+            if progress_callback:
+                progress_callback("🎤 Transcribing audio (this may take a while)...", 20)
             batch_size = 32 if self.device == "cuda" else 8
             
             result = self.model.transcribe(audio, batch_size=batch_size)
@@ -267,6 +274,8 @@ class Predictor:
 
             # Align
             print("[Predict] Aligning transcription...")
+            if progress_callback:
+                progress_callback("🔄 Aligning transcription with audio...", 40)
             try:
                 model_a, metadata = whisperx.load_align_model(
                     language_code=result["language"], 
@@ -285,6 +294,8 @@ class Predictor:
                 print(f"[Predict] Alignment failed: {e}, continuing with unaligned segments...")
 
             # Process segments with diarization
+            if include_diarization and progress_callback:
+                progress_callback("🎭 Processing speaker diarization...", 60)
             final_segments = self._process_diarization(
                 audio, result["segments"], include_diarization, fast_diarization
             )
@@ -295,9 +306,21 @@ class Predictor:
             print(f"[Predict] Generated full text ({len(full_text)} characters)")
 
             # Translation and summarization
+            if target_language != "None" and output_data["language_detected"] != target_language:
+                if progress_callback:
+                    progress_callback(f"🌍 Translating to {target_language}...", 75)
+
+            # Summarization
+            if custom_summary_prompt and custom_summary_prompt.strip():
+                if progress_callback:
+                    progress_callback("📋 Generating summary...", 85)
+                
             self._process_translation_and_summary(
                 output_data, full_text, target_language, custom_summary_prompt
             )
+
+            if progress_callback:
+                progress_callback("✅ Processing complete!", 100)
 
             print("[Predict] Pipeline completed successfully")
             return output_data
